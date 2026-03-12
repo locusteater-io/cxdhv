@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { useDomains } from "./useDomains";
 
 // ── SIGNAL DEFS ───────────────────────────────────────────────────────────────
 const SIGNAL_DEFS = [
@@ -93,8 +95,21 @@ const DOMAINS_INIT = [
 ];
 
 // ── SCORING ───────────────────────────────────────────────────────────────────
-function fnScore(fn)    { return fn.signals.reduce((a,s)=>a+s.score,0)/fn.signals.length; }
-function domainScore(d) { return d.functions.reduce((a,fn)=>a+fnScore(fn)*fn.weight,0); }
+function fnScore(fn)    {
+  if (!fn.signals.length) return 0;
+  // Team domain signals are per-member — simple average of active members only
+  const isTeamFn = fn.signals.some(s => s.role != null);
+  if (isTeamFn) {
+    const active = fn.signals.filter(s => s.active !== false);
+    if (!active.length) return 0;
+    return Math.min(100, active.reduce((a,s)=>a+s.score,0)/active.length);
+  }
+  // Standard domains — use weighted scoring if weights exist
+  const hasWeights = fn.signals.some(s => s.weight != null);
+  if (hasWeights) return Math.min(100, fn.signals.reduce((a,s)=>a+s.score*(s.weight||0.2),0));
+  return Math.min(100, fn.signals.reduce((a,s)=>a+s.score,0)/fn.signals.length);
+}
+function domainScore(d) { return Math.min(100, d.functions.reduce((a,fn)=>a+fnScore(fn)*fn.weight,0)); }
 function tier(s)        { return s>=75?"nominal":s>=55?"watch":"critical"; }
 function tierColor(s)   { return s>=75?"#4ade80":s>=55?"#facc15":"#f87171"; }
 function tierLabel(s)   { return s>=75?"NOMINAL":s>=55?"WATCH":"CRITICAL"; }
@@ -276,15 +291,15 @@ function IsoView({ domains, onClick }) {
           ctx.save();
           ctx.globalAlpha = labelAlpha * 0.9;
           ctx.fillStyle = domain.color;
-          ctx.font = `bold 9px 'SF Mono','Fira Code',monospace`;
+          ctx.font = `bold 11px 'SF Mono','Fira Code',monospace`;
           ctx.textAlign = "center";
           ctx.shadowColor = domain.color;
           ctx.shadowBlur = 6;
           ctx.fillText(domain.abbr, labelPt.x, labelPt.y);
           // Score
           ctx.fillStyle = tierColor(ds);
-          ctx.font = `bold 11px 'SF Mono','Fira Code',monospace`;
-          ctx.fillText(Math.round(ds), labelPt.x, labelPt.y + 13);
+          ctx.font = `bold 13px 'SF Mono','Fira Code',monospace`;
+          ctx.fillText(Math.round(ds), labelPt.x, labelPt.y + 15);
           ctx.restore();
         }
       });
@@ -300,7 +315,7 @@ function IsoView({ domains, onClick }) {
           ctx.save();
           ctx.globalAlpha = la * 0.5;
           ctx.fillStyle = "rgba(255,255,255,0.7)";
-          ctx.font = `700 7.5px 'SF Mono','Fira Code',monospace`;
+          ctx.font = `700 9px 'SF Mono','Fira Code',monospace`;
           ctx.textAlign = Math.cos(a) > 0.2 ? "left" : Math.cos(a) < -0.2 ? "right" : "center";
           ctx.fillText(fn.label.toUpperCase(), lx, ly);
           ctx.restore();
@@ -313,7 +328,7 @@ function IsoView({ domains, onClick }) {
         ctx.save();
         ctx.globalAlpha = 0.3 + 0.3 * pulse;
         ctx.fillStyle = "white";
-        ctx.font = `700 8px 'SF Mono','Fira Code',monospace`;
+        ctx.font = `700 10px 'SF Mono','Fira Code',monospace`;
         ctx.textAlign = "center";
         ctx.letterSpacing = "0.18em";
         ctx.fillText("CLICK TO EXPAND", cx, cy + 130);
@@ -335,10 +350,11 @@ function IsoView({ domains, onClick }) {
 }
 
 // ── RADAR CHART (domain card view) ───────────────────────────────────────────
-function RadarChart({ domain, size, doAnim }) {
+function RadarChart({ domain, size, doAnim, hoveredIdx, onHoverIdx }) {
   const canvasRef   = useRef(null);
   const animRef     = useRef(null);
   const progressRef = useRef(doAnim ? 0 : 1);
+  const dotPosRef   = useRef([]);
   const ds = domainScore(domain);
   const tc = tierColor(ds);
 
@@ -392,27 +408,33 @@ function RadarChart({ domain, size, doAnim }) {
       fns.forEach((fn,i)=>{ const [x,y]=pt(i,maxR*(fnScore(fn)/100)*p); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
       ctx.closePath(); ctx.stroke(); ctx.restore();
 
+      const dots=[];
       fns.forEach((fn,i)=>{
         const fs=fnScore(fn), vc=tierColor(fs);
         const [x,y]=pt(i,maxR*(fs/100)*p);
-        ctx.save(); ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=10;
-        ctx.beginPath(); ctx.arc(x,y,3.5,0,Math.PI*2); ctx.fill(); ctx.restore();
+        const isHov=hoveredIdx===i;
+        ctx.save(); ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=isHov?18:10;
+        ctx.beginPath(); ctx.arc(x,y,isHov?5.5:3.5,0,Math.PI*2); ctx.fill(); ctx.restore();
+        dots.push({x,y});
       });
+      dotPosRef.current=dots;
 
-      const lblR=maxR+40;
+      const lblR=maxR+22;
       fns.forEach((fn,i)=>{
         const [,,a]=pt(i,maxR);
         const lx=cx+Math.cos(a)*lblR, ly=cy+Math.sin(a)*lblR;
         const fs=fnScore(fn), vc=tierColor(fs);
+        const isHov=hoveredIdx===i;
+        const tag=`F${i+1}`;
         ctx.save();
         ctx.textAlign   =Math.cos(a)>0.15?"left":Math.cos(a)<-0.15?"right":"center";
         ctx.textBaseline=Math.sin(a)>0.15?"top" :Math.sin(a)<-0.15?"bottom":"middle";
-        ctx.fillStyle="rgba(255,255,255,0.5)";
-        ctx.font=`700 9px 'SF Mono','Fira Code',monospace`;
-        ctx.fillText(fn.label.toUpperCase(),lx,ly-7);
-        ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=5;
-        ctx.font=`bold 14px 'SF Mono','Fira Code',monospace`;
-        ctx.fillText(Math.round(fs),lx,ly+7);
+        ctx.fillStyle=isHov?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.45)";
+        ctx.font=`700 10px 'SF Mono','Fira Code',monospace`;
+        ctx.fillText(tag,lx,ly-7);
+        ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=isHov?10:5;
+        ctx.font=`bold ${isHov?18:15}px 'SF Mono','Fira Code',monospace`;
+        ctx.fillText(Math.round(fs),lx,ly+9);
         ctx.restore();
       });
 
@@ -421,9 +443,30 @@ function RadarChart({ domain, size, doAnim }) {
 
     draw();
     return () => cancelAnimationFrame(animRef.current);
-  }, [domain, size, tc, ds]);
+  }, [domain, size, tc, ds, hoveredIdx]);
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{display:"block"}} />;
+  const handleMouseMove=useCallback((e)=>{
+    const canvas=canvasRef.current;
+    if(!canvas||!onHoverIdx)return;
+    const rect=canvas.getBoundingClientRect();
+    const sx=canvas.width/rect.width, sy=canvas.height/rect.height;
+    const mx=(e.clientX-rect.left)*sx, my=(e.clientY-rect.top)*sy;
+    const dots=dotPosRef.current;
+    let closest=-1, minD=30;
+    dots.forEach((d,i)=>{
+      const dist=Math.sqrt((d.x-mx)**2+(d.y-my)**2);
+      if(dist<minD){minD=dist;closest=i;}
+    });
+    onHoverIdx(closest===-1?null:closest);
+  },[onHoverIdx]);
+
+  const handleMouseLeave=useCallback(()=>{
+    if(onHoverIdx)onHoverIdx(null);
+  },[onHoverIdx]);
+
+  return <canvas ref={canvasRef} width={size} height={size}
+    onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}
+    style={{display:"block"}} />;
 }
 
 // ── SIGNAL BAR ────────────────────────────────────────────────────────────────
@@ -432,13 +475,14 @@ function SignalBar({ sig, onUpdate }) {
   return (
     <div style={{marginBottom:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-        <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.06em",color:"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{sig.label}</span>
-        <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:tc}}>{sig.score}</span>
+        <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.06em",color:"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{sig.label}</span>
+        <span style={{fontFamily:"monospace",fontSize:13,fontWeight:"bold",color:tc}}>{sig.score}</span>
       </div>
       <div style={{position:"relative",height:3,background:"rgba(255,255,255,0.07)",borderRadius:2}}>
         <div style={{height:"100%",width:`${sig.score}%`,background:tc,borderRadius:2,boxShadow:`0 0 6px ${tc}77`,transition:"width 0.2s"}} />
         <input type="range" min={0} max={100} value={sig.score}
           onChange={e=>onUpdate(Number(e.target.value))}
+          onClick={e=>e.stopPropagation()}
           style={{position:"absolute",top:-10,left:0,width:"100%",opacity:0,cursor:"pointer",height:22,margin:0}} />
       </div>
     </div>
@@ -459,11 +503,11 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div style={{width:5,height:5,borderRadius:"50%",background:fc,boxShadow:`0 0 5px ${fc}`}} />
-                <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
+                <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
-                {selected&&<span style={{fontSize:8,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
+                <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
+                {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
               </div>
             </div>
             {isSel&&(
@@ -473,22 +517,23 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
                   if(!members.length)return null;
                   return (
                     <div key={role} style={{marginBottom:12}}>
-                      <div style={{fontFamily:"monospace",fontSize:7,letterSpacing:"0.22em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase",marginBottom:7,borderBottom:"1px solid rgba(255,255,255,0.04)",paddingBottom:4}}>{role}</div>
+                      <div style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.22em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase",marginBottom:7,borderBottom:"1px solid rgba(255,255,255,0.04)",paddingBottom:4}}>{role}</div>
                       {members.map(sig=>{
-                        const sc=tierColor(sig.score);
+                        const inactive=sig.active===false;
+                        const sc=inactive?"rgba(255,255,255,0.1)":tierColor(sig.score);
                         return (
-                          <div key={sig.id} style={{marginBottom:9}}>
+                          <div key={sig.id} style={{marginBottom:9,opacity:inactive?0.35:1}}>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                              <span style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.05em"}}>{sig.label}</span>
-                              <span style={{fontFamily:"monospace",fontSize:10,fontWeight:"bold",color:sc}}>{sig.score}</span>
+                              <span style={{fontFamily:"monospace",fontSize:11,color:inactive?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.05em",textDecoration:inactive?"line-through":"none"}}>{sig.label}{inactive?" (inactive)":""}</span>
+                              <span style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",color:sc}}>{inactive?"—":sig.score}</span>
                             </div>
-                            <div style={{position:"relative",height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
+                            {!inactive&&<div style={{position:"relative",height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
                               <div style={{height:"100%",width:`${sig.score}%`,background:sc,borderRadius:2,boxShadow:`0 0 5px ${sc}66`,transition:"width 0.2s"}} />
                               <input type="range" min={0} max={100} value={sig.score}
                                 onChange={e=>onUpdateMember(domain.id,fn.id,sig.id,Number(e.target.value))}
                                 onClick={e=>e.stopPropagation()}
                                 style={{position:"absolute",top:-10,left:0,width:"100%",opacity:0,cursor:"pointer",height:22,margin:0}} />
-                            </div>
+                            </div>}
                           </div>
                         );
                       })}
@@ -505,8 +550,9 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
 }
 
 // ── DOMAIN CARD ───────────────────────────────────────────────────────────────
-function DomainCard({ domain, selected, onClick, onUpdateSig, compact, slideIn, slideDelay }) {
+function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, compact, slideIn, slideDelay }) {
   const [expandedFn,setExpandedFn]=useState(null);
+  const [hoveredFnIdx,setHoveredFnIdx]=useState(null);
   const ds=domainScore(domain), tc=tierColor(ds), tl=tierLabel(ds), t=tier(ds);
   const radarSize=compact?120:selected?270:200;
   const [r,g,b]=hexToRgb(domain.color);
@@ -526,17 +572,19 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, compact, slideIn, 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{flex:1}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:compact?2:5}}>
-              <span style={{fontFamily:"monospace",fontSize:compact?7:8,letterSpacing:"0.38em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{domain.abbr}</span>
+              <span style={{fontFamily:"monospace",fontSize:compact?9:10,letterSpacing:"0.38em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{domain.abbr}</span>
               {domain.isTeamDomain&&!compact&&(
-                <span style={{fontFamily:"monospace",fontSize:6.5,letterSpacing:"0.14em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",border:"1px solid rgba(255,255,255,0.1)",padding:"1px 5px",borderRadius:2}}>10 members</span>
+                <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.14em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",border:"1px solid rgba(255,255,255,0.1)",padding:"1px 5px",borderRadius:2}}>{domain.functions[0]?.signals?.filter(s=>s.active!==false).length||0} active</span>
               )}
             </div>
-            {!compact&&<div style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",letterSpacing:"0.05em",color:"rgba(255,255,255,0.88)",textTransform:"uppercase",lineHeight:1.3}}>{domain.label}</div>}
-            {!compact&&selected&&<div style={{fontFamily:"monospace",fontSize:7.5,color:"rgba(255,255,255,0.28)",marginTop:5,lineHeight:1.5}}>{domain.desc}</div>}
+            {!compact&&<div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",letterSpacing:"0.05em",color:"rgba(255,255,255,0.88)",textTransform:"uppercase",lineHeight:1.3}}>{domain.label}</div>}
+            {!compact&&selected&&<div style={{fontFamily:"monospace",fontSize:10,color:"rgba(255,255,255,0.28)",marginTop:5,lineHeight:1.5}}>{domain.desc}</div>}
           </div>
           <div style={{textAlign:"right",flexShrink:0,marginLeft:14}}>
             <div style={{fontFamily:"monospace",fontSize:compact?22:40,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 18px ${tc}55`}}>{Math.round(ds)}</div>
-            <div style={{fontFamily:"monospace",fontSize:compact?6.5:8,letterSpacing:"0.26em",color:tc,fontWeight:"bold",marginTop:2}}>{tl}</div>
+            <div style={{fontFamily:"monospace",fontSize:compact?9:10,letterSpacing:"0.26em",color:tc,fontWeight:"bold",marginTop:2}}>{tl}</div>
+            {!compact&&onEdit&&<a href={`/admin?edit=${domain.id}`} onClick={e=>{e.preventDefault();e.stopPropagation();onEdit(domain.id);}}
+              style={{display:"inline-block",marginTop:6,fontFamily:"monospace",fontSize:8,letterSpacing:"0.12em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",textDecoration:"none",padding:"3px 8px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,cursor:"pointer"}}>Edit</a>}
           </div>
         </div>
         {!compact&&<div style={{marginTop:11,height:2.5,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
@@ -545,32 +593,37 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, compact, slideIn, 
       </div>
 
       <div style={{display:"flex",justifyContent:"center",alignItems:"center",padding:compact?"2px 0":"6px 0 0"}}>
-        <RadarChart domain={domain} size={radarSize} doAnim={!compact} />
+        <RadarChart domain={domain} size={radarSize} doAnim={!compact} hoveredIdx={hoveredFnIdx} onHoverIdx={compact?null:setHoveredFnIdx} />
       </div>
 
       {!compact&&!domain.isTeamDomain&&(
         <div style={{padding:"2px 20px 16px"}}>
-          {domain.functions.map(fn=>{
+          {domain.functions.map((fn,fnIdx)=>{
             const fs=fnScore(fn),fc=tierColor(fs),ft=tier(fs),isSel=expandedFn===fn.id&&selected;
+            const isHov=hoveredFnIdx===fnIdx;
             return (
               <div key={fn.id}
                 onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);}}
-                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:selected?"pointer":"default"}}>
+                onMouseEnter={()=>setHoveredFnIdx(fnIdx)}
+                onMouseLeave={()=>setHoveredFnIdx(null)}
+                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:selected?"pointer":"default",
+                  background:isHov?"rgba(255,255,255,0.04)":"transparent",borderRadius:isHov?3:0,transition:"background 0.15s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:ft==="critical"?6:5,height:ft==="critical"?6:5,borderRadius:ft==="critical"?1:"50%",background:fc,boxShadow:`0 0 5px ${fc}`,flexShrink:0}} />
+                    <span style={{fontFamily:"monospace",fontSize:9,fontWeight:"bold",color:isHov?fc:"rgba(255,255,255,0.3)",letterSpacing:"0.06em",flexShrink:0,width:18,textAlign:"center",transition:"color 0.15s"}}>F{fnIdx+1}</span>
+                    <div style={{width:ft==="critical"?6:5,height:ft==="critical"?6:5,borderRadius:ft==="critical"?1:"50%",background:fc,boxShadow:`0 0 ${isHov?10:5}px ${fc}`,flexShrink:0,transition:"box-shadow 0.15s"}} />
                     <div>
-                      <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.08em",fontWeight:isSel?"bold":"normal",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase",transition:"color 0.15s"}}>{fn.label}</span>
-                      {isSel&&<div style={{fontFamily:"monospace",fontSize:7,color:"rgba(255,255,255,0.22)",marginTop:2,lineHeight:1.4}}>{fn.desc}</div>}
+                      <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",fontWeight:isSel||isHov?"bold":"normal",color:isSel||isHov?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase",transition:"color 0.15s"}}>{fn.label}</span>
+                      {isSel&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,255,255,0.22)",marginTop:2,lineHeight:1.4}}>{fn.desc}</div>}
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-                    <span style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",color:fc,textShadow:`0 0 5px ${fc}44`}}>{Math.round(fs)}</span>
-                    {selected&&<span style={{fontSize:8,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
+                    <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc,textShadow:`0 0 5px ${fc}44`}}>{Math.round(fs)}</span>
+                    {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
                   </div>
                 </div>
                 {isSel&&(
-                  <div style={{marginTop:12,paddingLeft:15,animation:"fadeIn 0.15s ease"}}>
+                  <div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingLeft:15,animation:"fadeIn 0.15s ease"}}>
                     {fn.signals.map(sig=>(
                       <SignalBar key={sig.id} sig={sig} onUpdate={val=>onUpdateSig(domain.id,fn.id,sig.id,val)} />
                     ))}
@@ -589,15 +642,16 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, compact, slideIn, 
 
       {compact&&(
         <div style={{padding:"4px 14px 10px",display:"flex",flexDirection:"column",gap:5}}>
-          {domain.functions.map(fn=>{
+          {domain.functions.map((fn,fnIdx)=>{
             const fs=fnScore(fn),fc=tierColor(fs);
             return (
               <div key={fn.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontFamily:"monospace",fontSize:8,fontWeight:"bold",color:"rgba(255,255,255,0.22)",width:14}}>F{fnIdx+1}</span>
                   <div style={{width:3,height:3,borderRadius:"50%",background:fc,boxShadow:`0 0 3px ${fc}`}} />
-                  <span style={{fontFamily:"monospace",fontSize:7,letterSpacing:"0.06em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{fn.label}</span>
+                  <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.06em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{fn.label}</span>
                 </div>
-                <span style={{fontFamily:"monospace",fontSize:9,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
+                <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
               </div>
             );
           })}
@@ -609,16 +663,16 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, compact, slideIn, 
 
 // ── SYSTEM BAR ────────────────────────────────────────────────────────────────
 function SystemBar({ domains, selected, onSelect, onReset }) {
-  const overall=domains.reduce((a,d)=>a+domainScore(d),0)/domains.length;
+  const overall=Math.min(100,domains.reduce((a,d)=>a+domainScore(d),0)/domains.length);
   const tc=tierColor(overall);
   return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 22px",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,background:"rgba(0,0,0,0.25)"}}>
       <div style={{display:"flex",alignItems:"baseline",gap:12}}>
         <span
           onClick={onReset}
-          style={{fontFamily:"monospace",fontSize:8,letterSpacing:"0.44em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",cursor:"pointer"}}
+          style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.44em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",cursor:"pointer"}}
           title="Return to overview">goTenna</span>
-        <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.18em",color:"rgba(255,255,255,0.35)",textTransform:"uppercase"}}>CX Health</span>
+        <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.18em",color:"rgba(255,255,255,0.35)",textTransform:"uppercase"}}>CX Health</span>
       </div>
       <div style={{display:"flex",gap:7}}>
         {domains.map(d=>{
@@ -630,16 +684,17 @@ function SystemBar({ domains, selected, onSelect, onReset }) {
                 border:`1px solid ${isSel?tierBorder(ds):`rgba(${r},${g},${b},0.18)`}`,
                 background:isSel?tierBg(ds):`rgba(${r},${g},${b},0.04)`,transition:"all 0.15s"}}>
               <div style={{width:t==="critical"?6:4,height:t==="critical"?6:4,borderRadius:t==="critical"?1:"50%",background:dc,boxShadow:`0 0 5px ${dc}`}} />
-              <span style={{fontFamily:"monospace",fontSize:7.5,letterSpacing:"0.16em",color:`rgba(${r},${g},${b},0.9)`,textTransform:"uppercase"}}>{d.abbr}</span>
-              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
+              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.16em",color:`rgba(${r},${g},${b},0.9)`,textTransform:"uppercase"}}>{d.abbr}</span>
+              <span style={{fontFamily:"monospace",fontSize:13,fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
             </div>
           );
         })}
       </div>
       <div style={{display:"flex",alignItems:"baseline",gap:10}}>
-        <span style={{fontFamily:"monospace",fontSize:7.5,letterSpacing:"0.16em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>CX System</span>
+        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.16em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>CX System</span>
         <span style={{fontFamily:"monospace",fontSize:34,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 22px ${tc}55`}}>{Math.round(overall)}</span>
-        <span style={{fontFamily:"monospace",fontSize:8,letterSpacing:"0.26em",color:tc,fontWeight:"bold"}}>{tierLabel(overall)}</span>
+        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.26em",color:tc,fontWeight:"bold"}}>{tierLabel(overall)}</span>
+        <a href="/admin" style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.12em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",textDecoration:"none",padding:"4px 10px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,marginLeft:10}}>Admin</a>
       </div>
     </div>
   );
@@ -648,10 +703,18 @@ function SystemBar({ domains, selected, onSelect, onReset }) {
 // ── APP ───────────────────────────────────────────────────────────────────────
 // view: "iso" | "grid" | "expanded"
 export default function App() {
-  const [domains,  setDomains]  = useState(DOMAINS_INIT);
+  const navigate = useNavigate();
+  const { domains: dbDomains, loading, updateSignal } = useDomains();
+  const [domains,  setDomains]  = useState(null);
   const [view,     setView]     = useState("iso");   // iso → grid → expanded
   const [selected, setSelected] = useState(null);
   const [slideIn,  setSlideIn]  = useState(false);
+
+  // Use Supabase data when loaded, fallback to hardcoded
+  useEffect(() => {
+    if (dbDomains) setDomains(dbDomains);
+    else if (!loading) setDomains(DOMAINS_INIT);
+  }, [dbDomains, loading]);
 
   const handleIsoClick = () => {
     setSlideIn(true);
@@ -670,12 +733,26 @@ export default function App() {
     setView("iso");
   };
 
-  const updateSig = (domId,fnId,sigId,val) =>
+  const handleEdit = (domId) => {
+    navigate(`/admin?edit=${domId}`);
+  };
+
+  const updateSig = (domId,fnId,sigId,val) => {
+    // Local optimistic update
     setDomains(prev=>prev.map(d=>d.id!==domId?d:{
       ...d,functions:d.functions.map(fn=>fn.id!==fnId?fn:{
         ...fn,signals:fn.signals.map(s=>s.id!==sigId?s:{...s,score:val})
       })
     }));
+    // Persist to Supabase
+    updateSignal(domId,fnId,sigId,val);
+  };
+
+  if (!domains) return (
+    <div style={{minHeight:"100vh",background:"#020408",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.2em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase"}}>Loading...</div>
+    </div>
+  );
 
   const selDomain    = domains.find(d=>d.id===selected);
   const otherDomains = domains.filter(d=>d.id!==selected);
@@ -692,7 +769,7 @@ export default function App() {
           <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px"}}>
             {/* Header */}
             <div style={{marginBottom:16,textAlign:"center"}}>
-              <div style={{fontFamily:"monospace",fontSize:8,letterSpacing:"0.4em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",marginBottom:6}}>
+              <div style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.4em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",marginBottom:6}}>
                 System Overview — All Domains
               </div>
               <div style={{display:"flex",justifyContent:"center",gap:16,flexWrap:"wrap"}}>
@@ -702,8 +779,8 @@ export default function App() {
                   return (
                     <div key={d.id} style={{display:"flex",alignItems:"center",gap:5}}>
                       <div style={{width:8,height:2,background:d.color,borderRadius:1}} />
-                      <span style={{fontFamily:"monospace",fontSize:7,letterSpacing:"0.14em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{d.abbr}</span>
-                      <span style={{fontFamily:"monospace",fontSize:8,fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
+                      <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.14em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{d.abbr}</span>
+                      <span style={{fontFamily:"monospace",fontSize:10,fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
                     </div>
                   );
                 })}
@@ -721,14 +798,14 @@ export default function App() {
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
                 {domains.slice(0,3).map((d,i)=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={false}
-                    onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig}
+                    onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig} onEdit={handleEdit}
                     slideIn={slideIn} slideDelay={i*80} />
                 ))}
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,maxWidth:"66.8%",margin:"0 auto",width:"100%"}}>
                 {domains.slice(3).map((d,i)=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={false}
-                    onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig}
+                    onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig} onEdit={handleEdit}
                     slideIn={slideIn} slideDelay={(i+3)*80} />
                 ))}
               </div>
@@ -741,7 +818,7 @@ export default function App() {
           <div style={{padding:"16px 20px"}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:14,minHeight:500}}>
               <DomainCard domain={selDomain} selected={true} compact={false}
-                onClick={()=>handleSelect(null)} onUpdateSig={updateSig}
+                onClick={()=>handleSelect(null)} onUpdateSig={updateSig} onEdit={handleEdit}
                 slideIn={false} slideDelay={0} />
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 {otherDomains.map(d=>(
@@ -757,14 +834,14 @@ export default function App() {
 
       {/* Footer */}
       <div style={{padding:"7px 22px",borderTop:"1px solid rgba(255,255,255,0.05)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-        <span style={{fontFamily:"monospace",fontSize:7.5,letterSpacing:"0.1em",color:"rgba(255,255,255,0.14)",textTransform:"uppercase"}}>
+        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.1em",color:"rgba(255,255,255,0.14)",textTransform:"uppercase"}}>
           {view==="iso"?"Click to expand domains":view==="grid"?"Click domain to drill down · Click goTenna to return to overview":"Click header to return · Click function to drill into signals"}
         </span>
         <div style={{display:"flex",gap:16}}>
           {[["#4ade80","≥75 Nominal"],["#facc15","≥55 Watch"],["#f87171","<55 Critical"]].map(([c,l])=>(
             <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
               <div style={{width:5,height:5,borderRadius:"50%",background:c}} />
-              <span style={{fontFamily:"monospace",fontSize:7.5,letterSpacing:"0.1em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{l}</span>
+              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.1em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{l}</span>
             </div>
           ))}
         </div>
