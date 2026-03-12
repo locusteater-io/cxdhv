@@ -591,21 +591,56 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
   );
 }
 
+// ── FUNCTION POPUP ───────────────────────────────────────────────────────────
+function FnPopup({ fn, domainColor }) {
+  const fs=fnScore(fn), fc=tierColor(fs);
+  const [r,g,b]=hexToRgb(domainColor);
+  return (
+    <div onClick={e=>e.stopPropagation()} style={{
+      position:"absolute",left:"100%",top:0,marginLeft:12,zIndex:50,
+      width:280,background:"rgba(8,10,16,0.97)",border:`1px solid rgba(${r},${g},${b},0.25)`,
+      borderRadius:4,padding:"14px 16px",boxShadow:`0 8px 32px rgba(0,0,0,0.6), 0 0 12px rgba(${r},${g},${b},0.08)`,
+      animation:"fadeIn 0.15s ease",
+    }}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:"rgba(255,255,255,0.8)",textTransform:"uppercase",fontWeight:"bold"}}>{fn.label}</span>
+        <span style={{fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
+      </div>
+      {fn.desc&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,255,255,0.22)",marginBottom:12,lineHeight:1.5}}>{fn.desc}</div>}
+      {fn.signals.map(sig=>{
+        const sc=tierColor(sig.score);
+        return (
+          <div key={sig.id} style={{marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.05em",color:"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{sig.label}</span>
+              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:sc}}>{sig.score}</span>
+            </div>
+            <div style={{height:2.5,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
+              <div style={{height:"100%",width:`${sig.score}%`,background:sc,borderRadius:2,boxShadow:`0 0 5px ${sc}55`,transition:"width 0.2s"}} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── DOMAIN CARD ───────────────────────────────────────────────────────────────
 function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, compact, slideIn, slideDelay }) {
   const [expandedFn,setExpandedFn]=useState(null);
   const [hoveredFnIdx,setHoveredFnIdx]=useState(null);
+  const [popupFn,setPopupFn]=useState(null);
   const ds=domainScore(domain), tc=tierColor(ds), tl=tierLabel(ds), t=tier(ds);
   const radarSize=compact?120:selected?270:200;
   const [r,g,b]=hexToRgb(domain.color);
 
   return (
-    <div onClick={onClick} style={{
+    <div onClick={e=>{setPopupFn(null);onClick(e);}} style={{
       background:selected?tierBg(ds):"rgba(255,255,255,0.018)",
       border:`1px solid ${selected?tierBorder(ds):"rgba(255,255,255,0.07)"}`,
       borderLeft:`3px solid ${t==="critical"?"#f87171":t==="watch"?"#facc15":`rgba(${r},${g},${b},0.5)`}`,
       borderRadius:4, cursor:"pointer",
-      display:"flex", flexDirection:"column", overflow:"hidden",
+      display:"flex", flexDirection:"column", overflow:popupFn?"visible":"hidden",
       boxShadow:t==="critical"&&!compact?"0 0 28px rgba(248,113,113,0.1)":selected?`0 0 24px ${tc}15`:"none",
       animation: slideIn ? `slideIn 0.5s ease ${slideDelay}ms both` : "none",
       transition:"border 0.2s, background 0.2s, box-shadow 0.2s",
@@ -645,10 +680,10 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
             const isHov=hoveredFnIdx===fnIdx;
             return (
               <div key={fn.id}
-                onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);}}
+                onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);else setPopupFn(popupFn===fn.id?null:fn.id);}}
                 onMouseEnter={()=>setHoveredFnIdx(fnIdx)}
                 onMouseLeave={()=>setHoveredFnIdx(null)}
-                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:selected?"pointer":"default",
+                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:"pointer",position:"relative",
                   background:isHov?"rgba(255,255,255,0.04)":"transparent",borderRadius:isHov?3:0,transition:"background 0.15s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -671,6 +706,10 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
                     ))}
                   </div>
                 )}
+                {!selected&&popupFn===fn.id&&(<>
+                  <div onClick={e=>{e.stopPropagation();setPopupFn(null);}} style={{position:"fixed",inset:0,zIndex:49}} />
+                  <FnPopup fn={fn} domainColor={domain.color} />
+                </>)}
               </div>
             );
           })}

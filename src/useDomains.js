@@ -3,11 +3,11 @@ import { supabase } from './supabase'
 
 // Canonical signal order for standard (non-team) domains
 const SIGNAL_ORDER = [
+  'Overall Effectiveness',
   'Process Clarity',
   'Process Accuracy',
   'System Functionality',
   'Accountability & Visibility',
-  'Overall Effectiveness',
 ];
 
 // Transform flat DB rows into the nested structure App.jsx expects

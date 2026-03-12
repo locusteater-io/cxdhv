@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from './supabase'
 
+const SIGNAL_ORDER = [
+  'Overall Effectiveness',
+  'Process Clarity',
+  'Process Accuracy',
+  'System Functionality',
+  'Accountability & Visibility',
+]
+
 function tierColor(s) { return s >= 75 ? '#4ade80' : s >= 55 ? '#facc15' : '#f87171' }
 function hexToRgb(hex) { return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)] }
 
@@ -60,6 +68,16 @@ export default function AdminPage() {
         weight: Number(fn.weight),
         signals: sigs
           .filter(s => s.function_id === fn.id)
+          .sort((a, b) => {
+            if (!dom.is_team_domain) {
+              const ai = SIGNAL_ORDER.indexOf(a.label)
+              const bi = SIGNAL_ORDER.indexOf(b.label)
+              if (ai !== -1 && bi !== -1) return ai - bi
+              if (ai !== -1) return -1
+              if (bi !== -1) return 1
+            }
+            return a.label.localeCompare(b.label)
+          })
           .map(s => ({ ...s, score: Number(s.score), weight: Number(s.weight), active: s.active !== false })),
       })),
     })
