@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDomains } from "./useDomains";
+import { useResponsive, useWindowWidth, fs } from "./useMediaQuery";
 
 // ── SIGNAL DEFS ───────────────────────────────────────────────────────────────
 const SIGNAL_DEFS = [
@@ -119,12 +120,15 @@ function hexToRgb(hex)  { return [parseInt(hex.slice(1,3),16),parseInt(hex.slice
 
 // ── ISO RADAR (3D stacked view) ───────────────────────────────────────────────
 // Uses canvas to render all 5 domains as stacked planes on an isometric grid
-function IsoView({ domains, onClick }) {
+function IsoView({ domains, onClick, canvasWidth, canvasHeight }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
   const progRef   = useRef(0);
   const [hoveredDomain, setHoveredDomain] = useState(null);
   const planeHitsRef = useRef([]); // hit regions per domain for mouse detection
+
+  const CW = canvasWidth || 700;
+  const CH = canvasHeight || 520;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -139,7 +143,8 @@ function IsoView({ domains, onClick }) {
 
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2 + 40;
-    const RADAR_SCALE = 110;
+    const scale = W / 700;
+    const RADAR_SCALE = 110 * scale;
 
     const radarPt = (fnIdx, nFns, score, z) => {
       const a = (fnIdx / nFns) * Math.PI * 2 - Math.PI / 2;
@@ -153,7 +158,7 @@ function IsoView({ domains, onClick }) {
       return { x: cx + iso.sx, y: cy + iso.sy };
     };
 
-    const LAYER_Z = 54;
+    const LAYER_Z = 54 * scale;
     const NUM_DOMAINS = domains.length;
     const MAX_FNS = Math.max(...domains.map(d => d.functions.length));
 
@@ -172,7 +177,7 @@ function IsoView({ domains, onClick }) {
       ctx.clearRect(0, 0, W, H);
 
       // ── ISOMETRIC GRID ────────────────────────────────────────
-      const GRID_SIZE = 160, GRID_LINES = 6;
+      const GRID_SIZE = 160 * scale, GRID_LINES = 6;
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.lineWidth = 0.5;
@@ -270,9 +275,9 @@ function IsoView({ domains, onClick }) {
 
         // Vertex dots — sized by function weight
         fns.forEach((fn,i) => {
-          const fs = fnScore(fn);
-          const vc = tierColor(fs);
-          const pt = radarPt(i, nFns, fs, z);
+          const fsc = fnScore(fn);
+          const vc = tierColor(fsc);
+          const pt = radarPt(i, nFns, fsc, z);
           const wr = 2 + fn.weight * 8; // weight 0.2→3.6, 0.4→5.2
           ctx.save();
           ctx.globalAlpha = dimAlpha;
@@ -290,13 +295,13 @@ function IsoView({ domains, onClick }) {
           ctx.textAlign = "right";
           // Abbr
           ctx.fillStyle = domain.color;
-          ctx.font = `bold ${isHov ? 13 : 11}px 'SF Mono','Fira Code',monospace`;
+          ctx.font = `bold ${Math.round((isHov ? 13 : 11) * scale)}px 'SF Mono','Fira Code',monospace`;
           ctx.shadowColor = domain.color;
           ctx.shadowBlur = isHov ? 12 : 6;
           ctx.fillText(domain.abbr, labelPt.x - 8, labelPt.y);
           // Score
           ctx.fillStyle = tc;
-          ctx.font = `bold ${isHov ? 16 : 13}px 'SF Mono','Fira Code',monospace`;
+          ctx.font = `bold ${Math.round((isHov ? 16 : 13) * scale)}px 'SF Mono','Fira Code',monospace`;
           ctx.shadowColor = tc;
           ctx.fillText(Math.round(ds), labelPt.x - 8, labelPt.y + (isHov ? 18 : 15));
           ctx.restore();
@@ -306,7 +311,7 @@ function IsoView({ domains, onClick }) {
             ctx.save();
             ctx.globalAlpha = 0.6;
             ctx.fillStyle = "rgba(255,255,255,0.7)";
-            ctx.font = `600 9px 'SF Mono','Fira Code',monospace`;
+            ctx.font = `600 ${Math.round(9 * scale)}px 'SF Mono','Fira Code',monospace`;
             ctx.textAlign = "right";
             ctx.fillText(domain.label.toUpperCase(), labelPt.x - 8, labelPt.y - 14);
             ctx.fillStyle = tc;
@@ -323,7 +328,7 @@ function IsoView({ domains, onClick }) {
         ctx.save();
         ctx.globalAlpha = 0.3 + 0.3 * pulse;
         ctx.fillStyle = "white";
-        ctx.font = `700 10px 'SF Mono','Fira Code',monospace`;
+        ctx.font = `700 ${Math.round(10 * scale)}px 'SF Mono','Fira Code',monospace`;
         ctx.textAlign = "center";
         ctx.fillText("CLICK TO EXPAND", cx, cy + 130);
         ctx.restore();
@@ -334,7 +339,7 @@ function IsoView({ domains, onClick }) {
 
     animRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(animRef.current);
-  }, [domains, hoveredDomain]);
+  }, [domains, hoveredDomain, CW, CH]);
 
   // Point-in-polygon test for hover detection
   const pointInPoly = useCallback((px, py, pts) => {
@@ -365,11 +370,11 @@ function IsoView({ domains, onClick }) {
   const handleMouseLeave = useCallback(() => setHoveredDomain(null), []);
 
   return (
-    <canvas ref={canvasRef} width={700} height={520}
+    <canvas ref={canvasRef} width={CW} height={CH}
       onClick={onClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      style={{ display:"block", cursor:"pointer", margin:"0 auto" }} />
+      style={{ display:"block", cursor:"pointer", margin:"0 auto", width: CW, height: CH, maxWidth:"100%" }} />
   );
 }
 
@@ -434,8 +439,8 @@ function RadarChart({ domain, size, doAnim, hoveredIdx, onHoverIdx }) {
 
       const dots=[];
       fns.forEach((fn,i)=>{
-        const fs=fnScore(fn), vc=tierColor(fs);
-        const [x,y]=pt(i,maxR*(fs/100)*p);
+        const fsc=fnScore(fn), vc=tierColor(fsc);
+        const [x,y]=pt(i,maxR*(fsc/100)*p);
         const isHov=hoveredIdx===i;
         const wr=2+fn.weight*8; // weight 0.2→3.6, 0.4→5.2
         ctx.save(); ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=isHov?18:10;
@@ -448,7 +453,7 @@ function RadarChart({ domain, size, doAnim, hoveredIdx, onHoverIdx }) {
       fns.forEach((fn,i)=>{
         const [,,a]=pt(i,maxR);
         const lx=cx+Math.cos(a)*lblR, ly=cy+Math.sin(a)*lblR;
-        const fs=fnScore(fn), vc=tierColor(fs);
+        const fsc=fnScore(fn), vc=tierColor(fsc);
         const isHov=hoveredIdx===i;
         const tag=`F${i+1}`;
         ctx.save();
@@ -459,7 +464,7 @@ function RadarChart({ domain, size, doAnim, hoveredIdx, onHoverIdx }) {
         ctx.fillText(tag,lx,ly-7);
         ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=isHov?10:5;
         ctx.font=`bold ${isHov?18:15}px 'SF Mono','Fira Code',monospace`;
-        ctx.fillText(Math.round(fs),lx,ly+9);
+        ctx.fillText(Math.round(fsc),lx,ly+9);
         ctx.restore();
       });
 
@@ -515,7 +520,7 @@ function SignalBar({ sig, onUpdate }) {
 }
 
 // ── TEAM HEALTH PANEL ─────────────────────────────────────────────────────────
-function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
+function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn, isMobile }) {
   const [expandedFn,setExpandedFn]=useState(null);
   const [syncing,setSyncing]=useState(false);
   const [syncError,setSyncError]=useState(null);
@@ -528,7 +533,7 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
     finally{ setSyncing(false); }
   };
   return (
-    <div style={{padding:"0 20px 16px"}}>
+    <div style={{padding:isMobile?"0 14px 16px":"0 20px 16px"}}>
       {selected&&domain.functions.some(fn=>fn.signals.some(s=>s.source==="api"))&&(
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
           <span onClick={e=>handleSync(e)} title="Sync with Micro tool"
@@ -542,19 +547,19 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
         </div>
       )}
       {domain.functions.map(fn=>{
-        const fs=fnScore(fn), fc=tierColor(fs), isSel=expandedFn===fn.id&&selected;
+        const fsc=fnScore(fn), fc=tierColor(fsc), isSel=expandedFn===fn.id&&selected;
         const hasApiSignals=fn.signals.some(s=>s.source==="api");
         return (
           <div key={fn.id}
             onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);}}
-            style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:selected?"pointer":"default"}}>
+            style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:isMobile?"12px 0":"9px 0",cursor:selected?"pointer":"default",minHeight:isMobile?44:undefined}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div style={{width:5,height:5,borderRadius:"50%",background:fc,boxShadow:`0 0 5px ${fc}`}} />
-                <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
+                <span style={{fontFamily:"monospace",fontSize:fs(11,isMobile),letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
+                <span style={{fontFamily:"monospace",fontSize:fs(14,isMobile),fontWeight:"bold",color:fc}}>{Math.round(fsc)}</span>
                 {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
               </div>
             </div>
@@ -601,8 +606,8 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
 }
 
 // ── FUNCTION POPUP (centered modal) ──────────────────────────────────────────
-function FnPopup({ fn, domainColor, onClose }) {
-  const fs=fnScore(fn), fc=tierColor(fs), tl=tierLabel(fs);
+function FnPopup({ fn, domainColor, onClose, isMobile }) {
+  const fsc=fnScore(fn), fc=tierColor(fsc), tl=tierLabel(fsc);
   const [r,g,b]=hexToRgb(domainColor);
   useEffect(()=>{
     const h=e=>{if(e.key==="Escape")onClose();};
@@ -630,13 +635,13 @@ function FnPopup({ fn, domainColor, onClose }) {
               {fn.desc&&<div style={{fontFamily:"monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginTop:6,lineHeight:1.5,maxWidth:260}}>{fn.desc}</div>}
             </div>
             <div style={{textAlign:"right",flexShrink:0,marginLeft:16}}>
-              <div style={{fontFamily:"monospace",fontSize:32,fontWeight:"bold",color:fc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 20px ${fc}44`}}>{Math.round(fs)}</div>
-              <div style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.2em",color:fc,fontWeight:"bold",marginTop:3}}>{tl}</div>
+              <div style={{fontFamily:"monospace",fontSize:isMobile?24:32,fontWeight:"bold",color:fc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 20px ${fc}44`}}>{Math.round(fsc)}</div>
+              <div style={{fontFamily:"monospace",fontSize:fs(9,isMobile),letterSpacing:"0.2em",color:fc,fontWeight:"bold",marginTop:3}}>{tl}</div>
             </div>
           </div>
           {/* Score bar */}
           <div style={{marginTop:14,height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
-            <div style={{height:"100%",width:`${fs}%`,background:`linear-gradient(90deg, ${fc}88, ${fc})`,borderRadius:2,boxShadow:`0 0 10px ${fc}44`,transition:"width 0.4s"}} />
+            <div style={{height:"100%",width:`${fsc}%`,background:`linear-gradient(90deg, ${fc}88, ${fc})`,borderRadius:2,boxShadow:`0 0 10px ${fc}44`,transition:"width 0.4s"}} />
           </div>
         </div>
 
@@ -665,7 +670,7 @@ function FnPopup({ fn, domainColor, onClose }) {
         {/* Footer */}
         <div style={{padding:"0 24px 16px",display:"flex",justifyContent:"flex-end"}}>
           <button onClick={e=>{e.stopPropagation();onClose();}}
-            style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.3)",background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,padding:"5px 14px",cursor:"pointer"}}>
+            style={{fontFamily:"monospace",fontSize:fs(9,isMobile),letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.3)",background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,padding:isMobile?"8px 18px":"5px 14px",cursor:"pointer",minHeight:isMobile?44:undefined}}>
             Close
           </button>
         </div>
@@ -675,12 +680,12 @@ function FnPopup({ fn, domainColor, onClose }) {
 }
 
 // ── DOMAIN CARD ───────────────────────────────────────────────────────────────
-function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, compact, slideIn, slideDelay }) {
+function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, compact, slideIn, slideDelay, isMobile }) {
   const [expandedFn,setExpandedFn]=useState(null);
   const [hoveredFnIdx,setHoveredFnIdx]=useState(null);
   const [popupFn,setPopupFn]=useState(null);
   const ds=domainScore(domain), tc=tierColor(ds), tl=tierLabel(ds), t=tier(ds);
-  const radarSize=compact?120:selected?270:200;
+  const radarSize=compact?120:selected?(isMobile?200:270):(isMobile?160:200);
   const [r,g,b]=hexToRgb(domain.color);
 
   return (
@@ -694,20 +699,20 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
       animation: slideIn ? `slideIn 0.5s ease ${slideDelay}ms both` : "none",
       transition:"border 0.2s, background 0.2s, box-shadow 0.2s",
     }}>
-      <div style={{padding:compact?"10px 14px 8px":"16px 20px 12px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+      <div style={{padding:compact?"10px 14px 8px":isMobile?"12px 14px 10px":"16px 20px 12px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{flex:1}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:compact?2:5}}>
-              <span style={{fontFamily:"monospace",fontSize:compact?9:10,letterSpacing:"0.38em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{domain.abbr}</span>
+              <span style={{fontFamily:"monospace",fontSize:compact?9:fs(10,isMobile),letterSpacing:"0.38em",color:`rgba(${r},${g},${b},0.7)`,textTransform:"uppercase"}}>{domain.abbr}</span>
               {domain.isTeamDomain&&!compact&&(
                 <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.14em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",border:"1px solid rgba(255,255,255,0.1)",padding:"1px 5px",borderRadius:2}}>{domain.functions[0]?.signals?.filter(s=>s.active!==false).length||0} active</span>
               )}
             </div>
-            {!compact&&<div style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",letterSpacing:"0.05em",color:"rgba(255,255,255,0.88)",textTransform:"uppercase",lineHeight:1.3}}>{domain.label}</div>}
+            {!compact&&<div style={{fontFamily:"monospace",fontSize:fs(14,isMobile),fontWeight:"bold",letterSpacing:"0.05em",color:"rgba(255,255,255,0.88)",textTransform:"uppercase",lineHeight:1.3}}>{domain.label}</div>}
             {!compact&&selected&&<div style={{fontFamily:"monospace",fontSize:10,color:"rgba(255,255,255,0.28)",marginTop:5,lineHeight:1.5}}>{domain.desc}</div>}
           </div>
           <div style={{textAlign:"right",flexShrink:0,marginLeft:14}}>
-            <div style={{fontFamily:"monospace",fontSize:compact?22:40,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 18px ${tc}55`}}>{Math.round(ds)}</div>
+            <div style={{fontFamily:"monospace",fontSize:compact?22:isMobile?28:40,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 18px ${tc}55`}}>{Math.round(ds)}</div>
             <div style={{fontFamily:"monospace",fontSize:compact?9:10,letterSpacing:"0.26em",color:tc,fontWeight:"bold",marginTop:2}}>{tl}</div>
             {!compact&&onEdit&&<a href={`/admin?edit=${domain.id}`} onClick={e=>{e.preventDefault();e.stopPropagation();onEdit(domain.id);}}
               style={{display:"inline-block",marginTop:6,fontFamily:"monospace",fontSize:8,letterSpacing:"0.12em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",textDecoration:"none",padding:"3px 8px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,cursor:"pointer"}}>Edit</a>}
@@ -723,40 +728,41 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
       </div>
 
       {!compact&&!domain.isTeamDomain&&(
-        <div style={{padding:"2px 20px 16px"}}>
+        <div style={{padding:isMobile?"2px 14px 16px":"2px 20px 16px"}}>
           {domain.functions.map((fn,fnIdx)=>{
-            const fs=fnScore(fn),fc=tierColor(fs),ft=tier(fs),isSel=expandedFn===fn.id&&selected;
+            const fsc=fnScore(fn),fc=tierColor(fsc),ft=tier(fsc),isSel=expandedFn===fn.id&&selected;
             const isHov=hoveredFnIdx===fnIdx;
             return (
               <div key={fn.id}
                 onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);else setPopupFn(popupFn===fn.id?null:fn.id);}}
                 onMouseEnter={()=>setHoveredFnIdx(fnIdx)}
                 onMouseLeave={()=>setHoveredFnIdx(null)}
-                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:"9px 0",cursor:"pointer",position:"relative",
+                style={{borderTop:"1px solid rgba(255,255,255,0.05)",padding:isMobile?"12px 0":"9px 0",cursor:"pointer",position:"relative",
+                  minHeight:isMobile?44:undefined,
                   background:isHov?"rgba(255,255,255,0.04)":"transparent",borderRadius:isHov?3:0,transition:"background 0.15s"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{fontFamily:"monospace",fontSize:9,fontWeight:"bold",color:isHov?fc:"rgba(255,255,255,0.3)",letterSpacing:"0.06em",flexShrink:0,width:18,textAlign:"center",transition:"color 0.15s"}}>F{fnIdx+1}</span>
+                    <span style={{fontFamily:"monospace",fontSize:fs(9,isMobile),fontWeight:"bold",color:isHov?fc:"rgba(255,255,255,0.3)",letterSpacing:"0.06em",flexShrink:0,width:18,textAlign:"center",transition:"color 0.15s"}}>F{fnIdx+1}</span>
                     <div style={{width:ft==="critical"?6:5,height:ft==="critical"?6:5,borderRadius:ft==="critical"?1:"50%",background:fc,boxShadow:`0 0 ${isHov?10:5}px ${fc}`,flexShrink:0,transition:"box-shadow 0.15s"}} />
                     <div>
-                      <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",fontWeight:isSel||isHov?"bold":"normal",color:isSel||isHov?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase",transition:"color 0.15s"}}>{fn.label}</span>
-                      {isSel&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,255,255,0.22)",marginTop:2,lineHeight:1.4}}>{fn.desc}</div>}
+                      <span style={{fontFamily:"monospace",fontSize:fs(11,isMobile),letterSpacing:"0.08em",fontWeight:isSel||isHov?"bold":"normal",color:isSel||isHov?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase",transition:"color 0.15s"}}>{fn.label}</span>
+                      {isSel&&<div style={{fontFamily:"monospace",fontSize:fs(9,isMobile),color:"rgba(255,255,255,0.22)",marginTop:2,lineHeight:1.4}}>{fn.desc}</div>}
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-                    <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc,textShadow:`0 0 5px ${fc}44`}}>{Math.round(fs)}</span>
+                    <span style={{fontFamily:"monospace",fontSize:fs(14,isMobile),fontWeight:"bold",color:fc,textShadow:`0 0 5px ${fc}44`}}>{Math.round(fsc)}</span>
                     {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
                   </div>
                 </div>
                 {isSel&&(
-                  <div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingLeft:15,animation:"fadeIn 0.15s ease"}}>
+                  <div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingLeft:isMobile?8:15,animation:"fadeIn 0.15s ease"}}>
                     {fn.signals.map(sig=>(
                       <SignalBar key={sig.id} sig={sig} onUpdate={val=>onUpdateSig(domain.id,fn.id,sig.id,val)} />
                     ))}
                   </div>
                 )}
                 {!selected&&popupFn===fn.id&&(
-                  <FnPopup fn={fn} domainColor={domain.color} onClose={()=>setPopupFn(null)} />
+                  <FnPopup fn={fn} domainColor={domain.color} onClose={()=>setPopupFn(null)} isMobile={isMobile} />
                 )}
               </div>
             );
@@ -767,13 +773,13 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
       {!compact&&domain.isTeamDomain&&(
         <TeamHealthPanel domain={domain} selected={selected}
           onUpdateMember={(domId,fnId,sigId,val)=>onUpdateSig(domId,fnId,sigId,val)}
-          onSyncFn={onSyncFn} />
+          onSyncFn={onSyncFn} isMobile={isMobile} />
       )}
 
       {compact&&(
         <div style={{padding:"4px 14px 10px",display:"flex",flexDirection:"column",gap:5}}>
           {domain.functions.map((fn,fnIdx)=>{
-            const fs=fnScore(fn),fc=tierColor(fs);
+            const fsc=fnScore(fn),fc=tierColor(fsc);
             return (
               <div key={fn.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -781,7 +787,7 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
                   <div style={{width:3,height:3,borderRadius:"50%",background:fc,boxShadow:`0 0 3px ${fc}`}} />
                   <span style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.06em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{fn.label}</span>
                 </div>
-                <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
+                <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:fc}}>{Math.round(fsc)}</span>
               </div>
             );
           })}
@@ -792,39 +798,41 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
 }
 
 // ── SYSTEM BAR ────────────────────────────────────────────────────────────────
-function SystemBar({ domains, selected, onSelect, onReset }) {
+function SystemBar({ domains, selected, onSelect, onReset, isMobile }) {
   const overall=Math.min(100,domains.reduce((a,d)=>a+domainScore(d),0)/domains.length);
   const tc=tierColor(overall);
   return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 22px",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,background:"rgba(0,0,0,0.25)"}}>
-      <div style={{display:"flex",alignItems:"baseline",gap:12}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"8px 12px":"11px 22px",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,background:"rgba(0,0,0,0.25)",
+      flexWrap:isMobile?"wrap":"nowrap",gap:isMobile?8:0}}>
+      <div style={{display:"flex",alignItems:"baseline",gap:isMobile?8:12}}>
         <span
           onClick={onReset}
-          style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.44em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",cursor:"pointer"}}
+          style={{fontFamily:"monospace",fontSize:fs(10,isMobile),letterSpacing:"0.44em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",cursor:"pointer",minHeight:44,display:"flex",alignItems:"center"}}
           title="Return to overview">goTenna</span>
-        <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.18em",color:"rgba(255,255,255,0.35)",textTransform:"uppercase"}}>CX Health</span>
+        {!isMobile&&<span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.18em",color:"rgba(255,255,255,0.35)",textTransform:"uppercase"}}>CX Health</span>}
       </div>
-      <div style={{display:"flex",gap:7}}>
+      <div style={{display:"flex",gap:isMobile?4:7,flexWrap:isMobile?"wrap":"nowrap",order:isMobile?3:0,width:isMobile?"100%":"auto",justifyContent:isMobile?"center":"flex-start"}}>
         {domains.map(d=>{
           const ds=domainScore(d),dc=tierColor(ds),t=tier(ds),isSel=selected===d.id;
           const [r,g,b]=hexToRgb(d.color);
           return (
             <div key={d.id} onClick={()=>onSelect(isSel?null:d.id)}
-              style={{display:"flex",alignItems:"center",gap:7,padding:"4px 11px",borderRadius:3,cursor:"pointer",
+              style={{display:"flex",alignItems:"center",gap:isMobile?4:7,padding:isMobile?"6px 8px":"4px 11px",borderRadius:3,cursor:"pointer",
+                minHeight:isMobile?44:undefined,
                 border:`1px solid ${isSel?tierBorder(ds):`rgba(${r},${g},${b},0.18)`}`,
                 background:isSel?tierBg(ds):`rgba(${r},${g},${b},0.04)`,transition:"all 0.15s"}}>
               <div style={{width:t==="critical"?6:4,height:t==="critical"?6:4,borderRadius:t==="critical"?1:"50%",background:dc,boxShadow:`0 0 5px ${dc}`}} />
-              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.16em",color:`rgba(${r},${g},${b},0.9)`,textTransform:"uppercase"}}>{d.abbr}</span>
-              <span style={{fontFamily:"monospace",fontSize:13,fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
+              <span style={{fontFamily:"monospace",fontSize:fs(10,isMobile),letterSpacing:isMobile?"0.08em":"0.16em",color:`rgba(${r},${g},${b},0.9)`,textTransform:"uppercase"}}>{d.abbr}</span>
+              <span style={{fontFamily:"monospace",fontSize:fs(13,isMobile),fontWeight:"bold",color:dc}}>{Math.round(ds)}</span>
             </div>
           );
         })}
       </div>
-      <div style={{display:"flex",alignItems:"baseline",gap:10}}>
-        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.16em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>CX System</span>
-        <span style={{fontFamily:"monospace",fontSize:34,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 22px ${tc}55`}}>{Math.round(overall)}</span>
-        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.26em",color:tc,fontWeight:"bold"}}>{tierLabel(overall)}</span>
-        <a href="/admin" style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.12em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",textDecoration:"none",padding:"4px 10px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,marginLeft:10}}>Admin</a>
+      <div style={{display:"flex",alignItems:"baseline",gap:isMobile?6:10}}>
+        {!isMobile&&<span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.16em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>CX System</span>}
+        <span style={{fontFamily:"monospace",fontSize:isMobile?24:34,fontWeight:"bold",color:tc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 22px ${tc}55`}}>{Math.round(overall)}</span>
+        {!isMobile&&<span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.26em",color:tc,fontWeight:"bold"}}>{tierLabel(overall)}</span>}
+        <a href="/admin" style={{fontFamily:"monospace",fontSize:fs(9,isMobile),letterSpacing:"0.12em",color:"rgba(255,255,255,0.2)",textTransform:"uppercase",textDecoration:"none",padding:isMobile?"6px 10px":"4px 10px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,marginLeft:isMobile?4:10,minHeight:isMobile?44:undefined,display:"flex",alignItems:"center"}}>Admin</a>
       </div>
     </div>
   );
@@ -834,6 +842,8 @@ function SystemBar({ domains, selected, onSelect, onReset }) {
 // view: "iso" | "grid" | "expanded"
 export default function App() {
   const navigate = useNavigate();
+  const { isMobile, isTablet } = useResponsive();
+  const winWidth = useWindowWidth();
   const { domains: dbDomains, loading, updateSignal, syncTravelLoad } = useDomains();
   const [domains,  setDomains]  = useState(null);
   const [view,     setView]     = useState("iso");   // iso → grid → expanded
@@ -890,7 +900,7 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh",background:"#020408",color:"white",display:"flex",flexDirection:"column"}}>
 
-      <SystemBar domains={domains} selected={selected} onSelect={handleSelect} onReset={handleReset} />
+      <SystemBar domains={domains} selected={selected} onSelect={handleSelect} onReset={handleReset} isMobile={isMobile} />
 
       <div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column"}}>
 
@@ -917,26 +927,28 @@ export default function App() {
               </div>
             </div>
 
-            <IsoView domains={domains} onClick={handleIsoClick} />
+            <IsoView domains={domains} onClick={handleIsoClick}
+              canvasWidth={isMobile ? Math.min(360, winWidth - 40) : 700}
+              canvasHeight={isMobile ? Math.min(280, (winWidth - 40) * 0.74) : 520} />
           </div>
         )}
 
         {/* ── GRID VIEW ────────────────────────────────────────── */}
         {view==="grid"&&(
-          <div style={{padding:"16px 20px"}}>
+          <div style={{padding:isMobile?"12px 10px":"16px 20px"}}>
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"1fr 1fr 1fr",gap:14}}>
                 {domains.slice(0,3).map((d,i)=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={false}
                     onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig} onEdit={handleEdit}
-                    slideIn={slideIn} slideDelay={i*80} />
+                    slideIn={slideIn} slideDelay={i*80} isMobile={isMobile} />
                 ))}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,maxWidth:"66.8%",margin:"0 auto",width:"100%"}}>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,maxWidth:isMobile?"100%":"66.8%",margin:"0 auto",width:"100%"}}>
                 {domains.slice(3).map((d,i)=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={false}
                     onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig} onEdit={handleEdit}
-                    slideIn={slideIn} slideDelay={(i+3)*80} />
+                    slideIn={slideIn} slideDelay={(i+3)*80} isMobile={isMobile} />
                 ))}
               </div>
             </div>
@@ -945,16 +957,16 @@ export default function App() {
 
         {/* ── EXPANDED VIEW ─────────────────────────────────────── */}
         {view==="expanded"&&selDomain&&(
-          <div style={{padding:"16px 20px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:14,minHeight:500}}>
+          <div style={{padding:isMobile?"12px 10px":"16px 20px"}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 230px",gap:14,minHeight:isMobile?undefined:500}}>
               <DomainCard domain={selDomain} selected={true} compact={false}
                 onClick={()=>handleSelect(null)} onUpdateSig={updateSig} onEdit={handleEdit}
-                onSyncFn={syncTravelLoad} slideIn={false} slideDelay={0} />
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                onSyncFn={syncTravelLoad} slideIn={false} slideDelay={0} isMobile={isMobile} />
+              <div style={{display:isMobile?"grid":"flex",gridTemplateColumns:isMobile?"1fr 1fr":undefined,flexDirection:isMobile?undefined:"column",gap:10}}>
                 {otherDomains.map(d=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={true}
                     onClick={()=>handleSelect(d.id)} onUpdateSig={updateSig}
-                    slideIn={false} slideDelay={0} />
+                    slideIn={false} slideDelay={0} isMobile={isMobile} />
                 ))}
               </div>
             </div>
@@ -963,15 +975,15 @@ export default function App() {
       </div>
 
       {/* Footer */}
-      <div style={{padding:"7px 22px",borderTop:"1px solid rgba(255,255,255,0.05)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-        <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.1em",color:"rgba(255,255,255,0.14)",textTransform:"uppercase"}}>
+      <div style={{padding:isMobile?"7px 12px":"7px 22px",borderTop:"1px solid rgba(255,255,255,0.05)",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,flexWrap:isMobile?"wrap":"nowrap",gap:isMobile?4:0}}>
+        {!isMobile&&<span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.1em",color:"rgba(255,255,255,0.14)",textTransform:"uppercase"}}>
           {view==="iso"?"Click to expand domains":view==="grid"?"Click domain to drill down · Click goTenna to return to overview":"Click header to return · Click function to drill into signals"}
-        </span>
-        <div style={{display:"flex",gap:16}}>
-          {[["#4ade80","≥75 Nominal"],["#facc15","≥55 Watch"],["#f87171","<55 Critical"]].map(([c,l])=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+        </span>}
+        <div style={{display:"flex",gap:isMobile?10:16,justifyContent:isMobile?"center":"flex-end",width:isMobile?"100%":"auto"}}>
+          {[["#4ade80","≥75 Nom"],["#facc15","≥55 Watch"],["#f87171","<55 Crit"]].map(([c,l])=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
               <div style={{width:5,height:5,borderRadius:"50%",background:c}} />
-              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.1em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{l}</span>
+              <span style={{fontFamily:"monospace",fontSize:fs(9,isMobile),letterSpacing:"0.1em",color:"rgba(255,255,255,0.28)",textTransform:"uppercase"}}>{l}</span>
             </div>
           ))}
         </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from './supabase'
 import { SIGNAL_ORDER } from './constants'
+import { useResponsive, fs } from './useMediaQuery'
 
 function tierColor(s) { return s >= 75 ? '#4ade80' : s >= 55 ? '#facc15' : '#f87171' }
 function hexToRgb(hex) { return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)] }
@@ -17,6 +18,7 @@ const DEFAULT_SIGNALS = [
 ]
 
 export default function AdminPage() {
+  const { isMobile } = useResponsive()
   const [searchParams] = useSearchParams()
   const [domains, setDomains] = useState(null)
   const [functions, setFunctions] = useState(null)
@@ -392,15 +394,15 @@ export default function AdminPage() {
 
   return (
     <div style={S.page}>
-      <div style={S.header}>
+      <div style={{...S.header, padding: isMobile ? '12px 14px' : '16px 24px'}}>
         <div>
           <div style={S.brand}>CXDHV</div>
-          <div style={S.subtitle}>Signal Editor</div>
+          <div style={{...S.subtitle, fontSize: fs(13, isMobile)}}>Signal Editor</div>
         </div>
-        <a href="/" style={S.backLink}>← Dashboard</a>
+        <a href="/" style={{...S.backLink, minHeight: isMobile ? 44 : undefined, display: 'flex', alignItems: 'center', fontSize: fs(11, isMobile)}}>← Dashboard</a>
       </div>
 
-      <div style={S.grid}>
+      <div style={{...S.grid, gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', padding: isMobile ? '12px 10px' : '20px 24px'}}>
         {domains.map(domain => {
           const ds = domainAvg(domain.id)
           const tc = tierColor(ds)
@@ -420,7 +422,7 @@ export default function AdminPage() {
               toggleTeamMemberActive={toggleTeamMemberActive}
               updateTeamMemberRole={updateTeamMemberRole}
               addTeamMember={addTeamMember}
-              removeTeamMember={removeTeamMember} />
+              removeTeamMember={removeTeamMember} isMobile={isMobile} />
           )
 
           return (
@@ -432,7 +434,7 @@ export default function AdminPage() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ ...S.scoreNum, color: tc, fontSize: 24 }}>{Math.round(ds)}</span>
-                  <button onClick={() => startEdit(domain.id)} style={S.editBtn}>Edit</button>
+                  <button onClick={() => startEdit(domain.id)} style={{...S.editBtn, minHeight: isMobile ? 44 : undefined, padding: isMobile ? '8px 16px' : '5px 12px'}}>Edit</button>
                 </div>
               </div>
               <div style={S.fnList}>
@@ -475,7 +477,7 @@ export default function AdminPage() {
             toggleTeamMemberActive={toggleTeamMemberActive}
             updateTeamMemberRole={updateTeamMemberRole}
             addTeamMember={addTeamMember}
-            removeTeamMember={removeTeamMember} />
+            removeTeamMember={removeTeamMember} isMobile={isMobile} />
         )}
       </div>
     </div>
@@ -487,7 +489,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
   totalWeight, weightValid, saveError, saving,
   onSave, onCancel, onAddFn, onRemoveFn, draftDomainAvg, draftFnAvg,
   updateTeamMemberName, toggleTeamMemberActive, updateTeamMemberRole,
-  addTeamMember, removeTeamMember }) {
+  addTeamMember, removeTeamMember, isMobile }) {
 
   const ds = draftDomainAvg()
   const tc = tierColor(ds)
@@ -551,7 +553,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
             return (
             <div key={mi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, opacity: m.active ? 1 : 0.35 }}>
               <button onClick={() => toggleTeamMemberActive(mi)}
-                style={{ ...S.toggleBtn, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)', cursor: 'pointer' }}>
+                style={{ ...S.toggleBtn, width: isMobile ? 36 : 22, height: isMobile ? 36 : 22, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)', cursor: 'pointer' }}>
                 {m.active ? '●' : '○'}
               </button>
               <input value={m.label} readOnly={isApi}
@@ -568,7 +570,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
                 <option value="CS">CS</option>
               </select>
               {!isApi && <button onClick={() => { if(window.confirm(`Remove "${m.label}"? You can undo by canceling the edit.`)) removeTeamMember(mi) }}
-                style={S.removeBtn} title="Remove member">×</button>}
+                style={{...S.removeBtn, width: isMobile ? 36 : 22, height: isMobile ? 36 : 22}} title="Remove member">×</button>}
               {isApi && <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.1em' }}>MICRO</span>}
             </div>
             );
@@ -609,7 +611,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
                 <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)' }}>{isExpanded ? '▲' : '▼'}</span>
                 {draft.functions.length > 3 && (
                   <button onClick={e => { e.stopPropagation(); if(window.confirm(`Remove "${fn.label}"? You can undo by canceling the edit.`)) onRemoveFn(fn.id) }}
-                    style={{ ...S.removeBtn, marginLeft: 8 }} title="Remove function">×</button>
+                    style={{ ...S.removeBtn, marginLeft: 8, width: isMobile ? 36 : 22, height: isMobile ? 36 : 22 }} title="Remove function">×</button>
                 )}
               </div>
             </div>
@@ -675,12 +677,12 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
         </div>
       )}
 
-      <div style={S.actionBar}>
+      <div style={{...S.actionBar, flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center'}}>
         {saveError && <div style={S.errorMsg}>{saveError}</div>}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={onCancel} style={S.cancelBtn}>Cancel</button>
+        <div style={{ display: 'flex', gap: 10, justifyContent: isMobile ? 'stretch' : 'flex-end' }}>
+          <button onClick={onCancel} style={{...S.cancelBtn, flex: isMobile ? 1 : undefined, minHeight: isMobile ? 44 : undefined}}>Cancel</button>
           <button onClick={onSave} disabled={saving || !weightValid}
-            style={{ ...S.saveBtn, opacity: (saving || !weightValid) ? 0.4 : 1 }}>
+            style={{ ...S.saveBtn, opacity: (saving || !weightValid) ? 0.4 : 1, flex: isMobile ? 1 : undefined, minHeight: isMobile ? 44 : undefined }}>
             {saving ? 'Saving...' : 'Save Domain'}
           </button>
         </div>
@@ -760,7 +762,7 @@ const S = {
   brand: { fontSize: 10, letterSpacing: '0.44em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' },
   subtitle: { fontSize: 13, letterSpacing: '0.18em', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', marginTop: 2 },
   backLink: { fontSize: 11, color: 'rgba(255,255,255,0.3)', textDecoration: 'none', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '6px 12px', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 },
-  grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, padding: '20px 24px' },
+  grid: { display: 'grid', gap: 14, padding: '20px 24px' },
   domainCard: { background: 'rgba(255,255,255,0.018)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 4, overflow: 'hidden' },
   domainHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px' },
   abbr: { fontSize: 9, letterSpacing: '0.38em', textTransform: 'uppercase', marginRight: 10 },
