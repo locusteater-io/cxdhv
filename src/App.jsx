@@ -591,36 +591,71 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
   );
 }
 
-// ── FUNCTION POPUP ───────────────────────────────────────────────────────────
-function FnPopup({ fn, domainColor }) {
-  const fs=fnScore(fn), fc=tierColor(fs);
+// ── FUNCTION POPUP (centered modal) ──────────────────────────────────────────
+function FnPopup({ fn, domainColor, onClose }) {
+  const fs=fnScore(fn), fc=tierColor(fs), tl=tierLabel(fs);
   const [r,g,b]=hexToRgb(domainColor);
   return (
-    <div onClick={e=>e.stopPropagation()} style={{
-      position:"absolute",left:"100%",top:0,marginLeft:12,zIndex:50,
-      width:280,background:"rgba(8,10,16,0.97)",border:`1px solid rgba(${r},${g},${b},0.25)`,
-      borderRadius:4,padding:"14px 16px",boxShadow:`0 8px 32px rgba(0,0,0,0.6), 0 0 12px rgba(${r},${g},${b},0.08)`,
-      animation:"fadeIn 0.15s ease",
+    <div onClick={e=>{e.stopPropagation();onClose();}} style={{
+      position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(2,4,8,0.75)",backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)",
+      animation:"popupFadeIn 0.2s ease",
     }}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:"rgba(255,255,255,0.8)",textTransform:"uppercase",fontWeight:"bold"}}>{fn.label}</span>
-        <span style={{fontFamily:"monospace",fontSize:16,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
-      </div>
-      {fn.desc&&<div style={{fontFamily:"monospace",fontSize:9,color:"rgba(255,255,255,0.22)",marginBottom:12,lineHeight:1.5}}>{fn.desc}</div>}
-      {fn.signals.map(sig=>{
-        const sc=tierColor(sig.score);
-        return (
-          <div key={sig.id} style={{marginBottom:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-              <span style={{fontFamily:"monospace",fontSize:10,letterSpacing:"0.05em",color:"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{sig.label}</span>
-              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:"bold",color:sc}}>{sig.score}</span>
+      <div onClick={e=>e.stopPropagation()} style={{
+        width:380,maxWidth:"90vw",background:`linear-gradient(170deg, rgba(${r},${g},${b},0.06) 0%, #0a0c12 40%, #0a0c12 100%)`,
+        border:`1px solid rgba(${r},${g},${b},0.2)`,
+        borderRadius:8,padding:0,overflow:"hidden",
+        boxShadow:`0 24px 80px rgba(0,0,0,0.7), 0 0 40px rgba(${r},${g},${b},0.06), inset 0 1px 0 rgba(255,255,255,0.04)`,
+        animation:"popupSlideUp 0.25s ease",
+      }}>
+        {/* Header */}
+        <div style={{padding:"20px 24px 16px",borderBottom:`1px solid rgba(${r},${g},${b},0.1)`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontFamily:"monospace",fontSize:13,letterSpacing:"0.1em",color:"rgba(255,255,255,0.9)",textTransform:"uppercase",fontWeight:"bold",lineHeight:1.3}}>{fn.label}</div>
+              {fn.desc&&<div style={{fontFamily:"monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginTop:6,lineHeight:1.5,maxWidth:260}}>{fn.desc}</div>}
             </div>
-            <div style={{height:2.5,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
-              <div style={{height:"100%",width:`${sig.score}%`,background:sc,borderRadius:2,boxShadow:`0 0 5px ${sc}55`,transition:"width 0.2s"}} />
+            <div style={{textAlign:"right",flexShrink:0,marginLeft:16}}>
+              <div style={{fontFamily:"monospace",fontSize:32,fontWeight:"bold",color:fc,lineHeight:1,letterSpacing:"-0.04em",textShadow:`0 0 20px ${fc}44`}}>{Math.round(fs)}</div>
+              <div style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.2em",color:fc,fontWeight:"bold",marginTop:3}}>{tl}</div>
             </div>
           </div>
-        );
-      })}
+          {/* Score bar */}
+          <div style={{marginTop:14,height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
+            <div style={{height:"100%",width:`${fs}%`,background:`linear-gradient(90deg, ${fc}88, ${fc})`,borderRadius:2,boxShadow:`0 0 10px ${fc}44`,transition:"width 0.4s"}} />
+          </div>
+        </div>
+
+        {/* Signals */}
+        <div style={{padding:"16px 24px 20px"}}>
+          <div style={{fontFamily:"monospace",fontSize:8,letterSpacing:"0.25em",color:"rgba(255,255,255,0.15)",textTransform:"uppercase",marginBottom:14}}>Signals</div>
+          {fn.signals.map(sig=>{
+            const sc=tierColor(sig.score);
+            return (
+              <div key={sig.id} style={{marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                  <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.06em",color:"rgba(255,255,255,0.55)",textTransform:"uppercase"}}>{sig.label}</span>
+                  <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+                    <span style={{fontFamily:"monospace",fontSize:15,fontWeight:"bold",color:sc}}>{sig.score}</span>
+                    <span style={{fontFamily:"monospace",fontSize:8,color:"rgba(255,255,255,0.15)"}}>/100</span>
+                  </div>
+                </div>
+                <div style={{height:4,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
+                  <div style={{height:"100%",width:`${sig.score}%`,background:`linear-gradient(90deg, ${sc}88, ${sc})`,borderRadius:2,boxShadow:`0 0 8px ${sc}33`,transition:"width 0.3s"}} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:"0 24px 16px",display:"flex",justifyContent:"flex-end"}}>
+          <button onClick={e=>{e.stopPropagation();onClose();}}
+            style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.3)",background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,padding:"5px 14px",cursor:"pointer"}}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -635,12 +670,12 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
   const [r,g,b]=hexToRgb(domain.color);
 
   return (
-    <div onClick={e=>{setPopupFn(null);onClick(e);}} style={{
+    <div onClick={onClick} style={{
       background:selected?tierBg(ds):"rgba(255,255,255,0.018)",
       border:`1px solid ${selected?tierBorder(ds):"rgba(255,255,255,0.07)"}`,
       borderLeft:`3px solid ${t==="critical"?"#f87171":t==="watch"?"#facc15":`rgba(${r},${g},${b},0.5)`}`,
       borderRadius:4, cursor:"pointer",
-      display:"flex", flexDirection:"column", overflow:popupFn?"visible":"hidden",
+      display:"flex", flexDirection:"column", overflow:"hidden",
       boxShadow:t==="critical"&&!compact?"0 0 28px rgba(248,113,113,0.1)":selected?`0 0 24px ${tc}15`:"none",
       animation: slideIn ? `slideIn 0.5s ease ${slideDelay}ms both` : "none",
       transition:"border 0.2s, background 0.2s, box-shadow 0.2s",
@@ -706,10 +741,9 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, 
                     ))}
                   </div>
                 )}
-                {!selected&&popupFn===fn.id&&(<>
-                  <div onClick={e=>{e.stopPropagation();setPopupFn(null);}} style={{position:"fixed",inset:0,zIndex:49}} />
-                  <FnPopup fn={fn} domainColor={domain.color} />
-                </>)}
+                {!selected&&popupFn===fn.id&&(
+                  <FnPopup fn={fn} domainColor={domain.color} onClose={()=>setPopupFn(null)} />
+                )}
               </div>
             );
           })}
@@ -936,6 +970,8 @@ export default function App() {
         }
         @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
         @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        @keyframes popupFadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes popupSlideUp{from{opacity:0;transform:translateY(16px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
         input[type=range]{-webkit-appearance:none;appearance:none;background:transparent}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:white;cursor:pointer}
         ::-webkit-scrollbar{width:3px;height:3px}
