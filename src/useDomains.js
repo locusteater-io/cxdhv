@@ -101,5 +101,21 @@ export function useDomains() {
     if (error) console.error('Failed to save signal:', error)
   }, [])
 
-  return { domains, loading, error, updateSignal, reload: load }
+  // Trigger sync-travel-load edge function and reload
+  const syncTravelLoad = useCallback(async () => {
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-travel-load`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    )
+    if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
+    await load()
+  }, [load])
+
+  return { domains, loading, error, updateSignal, syncTravelLoad, reload: load }
 }

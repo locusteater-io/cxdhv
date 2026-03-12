@@ -8,13 +8,12 @@ const corsHeaders = {
 const LOOKBACK_DAYS = 90;
 const FUNCTION_ID = "travel_load";
 
-function countDaysInRange(start: string, end: string): number {
+function diffDays(start: string, end: string): number {
   const s = new Date(start + "T00:00:00Z");
   const e = new Date(end + "T00:00:00Z");
   return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
 }
 
-// Map micro app_role to CXDHV signal role label
 function roleLabel(appRole: string | null): string {
   switch (appRole) {
     case "cx_vp":
@@ -42,10 +41,11 @@ Deno.serve(async (req) => {
     );
 
     const now = new Date();
-    const lookbackDate = new Date(now.getTime() - LOOKBACK_DAYS * 86400000);
-    const cutoff = lookbackDate.toISOString().slice(0, 10);
+    const nowStr = now.toISOString().slice(0, 10);
+    const ninetyAgo = new Date(now.getTime() - LOOKBACK_DAYS * 86400000);
+    const cutoff = ninetyAgo.toISOString().slice(0, 10);
 
-    // Get all profiles + their roles
+    // Get all profiles + roles
     const { data: profiles, error: profErr } = await supabase
       .from("micro_profiles")
       .select("id, full_name");
@@ -56,15 +56,16 @@ Deno.serve(async (req) => {
       .select("user_id, role");
     const roleMap = new Map((roles || []).map(r => [r.user_id, r.role]));
 
-    // Get all trips that overlap with the lookback window
+    // Get past trips only: event_end < today AND event_end >= 90 days ago
     const { data: trips, error: tripErr } = await supabase
       .from("micro_trips")
-      .select("id, type, event_start, event_end, travel_day_start, travel_day_end, deleted")
+      .select("id, type, event_start, event_end, deleted")
       .eq("deleted", false)
+      .lt("event_end", nowStr)
       .gte("event_end", cutoff);
     if (tripErr) throw tripErr;
 
-    // Get assignments for those trips
+    // Get assignments
     const tripIds = (trips || []).map(t => t.id);
     const { data: assignments, error: assignErr } = await supabase
       .from("micro_trip_assignments")
@@ -84,15 +85,23 @@ Deno.serve(async (req) => {
     const profileCount = (profiles || []).length;
     const weight = profileCount > 0 ? Math.round((1 / profileCount) * 100) / 100 : 0.1;
 
+    // Fetch existing signals to preserve active state
+    const { data: existingSignals } = await supabase
+      .from("signals")
+      .select("id, active")
+      .eq("function_id", FUNCTION_ID);
+    const existingActiveMap = new Map((existingSignals || []).map(s => [s.id, s.active]));
+
     const activeSignalIds: string[] = [];
     const results: { name: string; signal_id: string; road_days: number; pto_days: number; trip_count: number; micro_score: number; cxdhv_score: number }[] = [];
 
     for (const profile of profiles || []) {
       const myTrips = userTrips[profile.id] || [];
-      // Deterministic signal ID from profile UUID
       const signalId = `travel_${profile.id}`;
       activeSignalIds.push(signalId);
 
+      // Road days = event_start to event_end for in_person + travel_day types
+      // (matches Micro: does NOT include travel_day_start/travel_day_end fields)
       let roadDays = 0;
       let ptoDays = 0;
       let tripCount = 0;
@@ -101,24 +110,21 @@ Deno.serve(async (req) => {
         const type = trip.type || "in_person";
 
         if (type === "pto") {
-          ptoDays += countDaysInRange(trip.event_start, trip.event_end);
+          ptoDays += diffDays(trip.event_start, trip.event_end);
           continue;
         }
 
-        if (type === "no_travel" || type === "mil_time") {
+        if (type === "no_travel" || type === "mil_time" || type === "virtual") {
           continue;
         }
 
-        tripCount++;
+        // in_person and travel_day count toward road days
+        roadDays += diffDays(trip.event_start, trip.event_end);
 
-        let days = countDaysInRange(trip.event_start, trip.event_end);
-        if (trip.travel_day_start && trip.travel_day_start < trip.event_start) {
-          days += countDaysInRange(trip.travel_day_start, trip.event_start) - 1;
+        // Only in_person counts as a "trip"
+        if (type === "in_person") {
+          tripCount++;
         }
-        if (trip.travel_day_end && trip.travel_day_end > trip.event_end) {
-          days += countDaysInRange(trip.event_end, trip.travel_day_end) - 1;
-        }
-        roadDays += days;
       }
 
       // Micro formula: clamp(0, 100, round((road_days * 2 + trip_count) / (pto_days + 5) * 10))
@@ -129,7 +135,6 @@ Deno.serve(async (req) => {
 
       const role = roleLabel(roleMap.get(profile.id) || null);
 
-      // Upsert signal — create if missing, update if exists
       await supabase
         .from("signals")
         .upsert({
@@ -141,7 +146,7 @@ Deno.serve(async (req) => {
           source_ref: `micro_profile:${profile.id}`,
           role: role,
           weight: weight,
-          active: true,
+          active: existingActiveMap.has(signalId) ? existingActiveMap.get(signalId) : true,
           updated_at: new Date().toISOString(),
         }, { onConflict: "id" });
 
@@ -156,7 +161,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Deactivate any travel_load signals that no longer match a profile
+    // Deactivate orphaned signals
     if (activeSignalIds.length > 0) {
       await supabase
         .from("signals")

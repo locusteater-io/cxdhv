@@ -515,12 +515,20 @@ function SignalBar({ sig, onUpdate }) {
 }
 
 // ── TEAM HEALTH PANEL ─────────────────────────────────────────────────────────
-function TeamHealthPanel({ domain, selected, onUpdateMember }) {
+function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
   const [expandedFn,setExpandedFn]=useState(null);
+  const [syncing,setSyncing]=useState(null);
+  const handleSync=async(e,fnId)=>{
+    e.stopPropagation();
+    setSyncing(fnId);
+    try{ await onSyncFn(fnId); }catch(err){ console.error("Sync failed:",err); }
+    finally{ setSyncing(null); }
+  };
   return (
     <div style={{padding:"0 20px 16px"}}>
       {domain.functions.map(fn=>{
         const fs=fnScore(fn), fc=tierColor(fs), isSel=expandedFn===fn.id&&selected;
+        const hasApiSignals=fn.signals.some(s=>s.source==="api");
         return (
           <div key={fn.id}
             onClick={e=>{e.stopPropagation();if(selected)setExpandedFn(isSel?null:fn.id);}}
@@ -531,6 +539,12 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
                 <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
+                {selected&&hasApiSignals&&(
+                  <span onClick={e=>handleSync(e,fn.id)} title="Sync with Micro tool"
+                    style={{fontSize:13,cursor:"pointer",opacity:syncing===fn.id?0.4:0.5,transition:"opacity 0.15s",animation:syncing===fn.id?"spin 1s linear infinite":"none"}}>
+                    &#x21bb;
+                  </span>
+                )}
                 <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
                 {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
               </div>
@@ -549,7 +563,10 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
                         return (
                           <div key={sig.id} style={{marginBottom:9,opacity:inactive?0.35:1}}>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                              <span style={{fontFamily:"monospace",fontSize:11,color:inactive?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.05em",textDecoration:inactive?"line-through":"none"}}>{sig.label}{inactive?" (inactive)":""}</span>
+                              <span style={{fontFamily:"monospace",fontSize:11,color:inactive?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.05em",textDecoration:inactive?"line-through":"none"}}>
+                                {sig.label}{inactive?" (inactive)":""}
+                                {sig.source==="api"&&!inactive&&<span title="Calculated from Micro" style={{marginLeft:5,fontSize:10,opacity:0.5}}>&#402;</span>}
+                              </span>
                               <span style={{fontFamily:"monospace",fontSize:12,fontWeight:"bold",color:sc}}>{inactive?"—":sig.score}</span>
                             </div>
                             {!inactive&&<div style={{position:"relative",height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
@@ -575,7 +592,7 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
 }
 
 // ── DOMAIN CARD ───────────────────────────────────────────────────────────────
-function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, compact, slideIn, slideDelay }) {
+function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, onSyncFn, compact, slideIn, slideDelay }) {
   const [expandedFn,setExpandedFn]=useState(null);
   const [hoveredFnIdx,setHoveredFnIdx]=useState(null);
   const ds=domainScore(domain), tc=tierColor(ds), tl=tierLabel(ds), t=tier(ds);
@@ -662,7 +679,8 @@ function DomainCard({ domain, selected, onClick, onUpdateSig, onEdit, compact, s
 
       {!compact&&domain.isTeamDomain&&(
         <TeamHealthPanel domain={domain} selected={selected}
-          onUpdateMember={(domId,fnId,sigId,val)=>onUpdateSig(domId,fnId,sigId,val)} />
+          onUpdateMember={(domId,fnId,sigId,val)=>onUpdateSig(domId,fnId,sigId,val)}
+          onSyncFn={onSyncFn} />
       )}
 
       {compact&&(
@@ -729,7 +747,7 @@ function SystemBar({ domains, selected, onSelect, onReset }) {
 // view: "iso" | "grid" | "expanded"
 export default function App() {
   const navigate = useNavigate();
-  const { domains: dbDomains, loading, updateSignal } = useDomains();
+  const { domains: dbDomains, loading, updateSignal, syncTravelLoad } = useDomains();
   const [domains,  setDomains]  = useState(null);
   const [view,     setView]     = useState("iso");   // iso → grid → expanded
   const [selected, setSelected] = useState(null);
@@ -844,7 +862,7 @@ export default function App() {
             <div style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:14,minHeight:500}}>
               <DomainCard domain={selDomain} selected={true} compact={false}
                 onClick={()=>handleSelect(null)} onUpdateSig={updateSig} onEdit={handleEdit}
-                slideIn={false} slideDelay={0} />
+                onSyncFn={syncTravelLoad} slideIn={false} slideDelay={0} />
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 {otherDomains.map(d=>(
                   <DomainCard key={d.id} domain={d} selected={false} compact={true}
@@ -878,6 +896,7 @@ export default function App() {
           to   { opacity:1; transform: translateY(0); }
         }
         @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
         input[type=range]{-webkit-appearance:none;appearance:none;background:transparent}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:white;cursor:pointer}
         ::-webkit-scrollbar{width:3px;height:3px}

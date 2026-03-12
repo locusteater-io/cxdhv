@@ -529,8 +529,8 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
             const isApi = m.source === 'api';
             return (
             <div key={mi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, opacity: m.active ? 1 : 0.35 }}>
-              <button onClick={() => !isApi && toggleTeamMemberActive(mi)}
-                style={{ ...S.toggleBtn, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)', cursor: isApi ? 'default' : 'pointer' }}>
+              <button onClick={() => toggleTeamMemberActive(mi)}
+                style={{ ...S.toggleBtn, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)', cursor: 'pointer' }}>
                 {m.active ? '●' : '○'}
               </button>
               <input value={m.label} readOnly={isApi}
@@ -625,7 +625,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
 
                 {isTeam ? (
                   // Team: show member scores grouped by role
-                  ['Manager', 'FDE', 'CS'].map(role => {
+                  ['CX VP', 'CX Director', 'CX Manager', 'FDE', 'CS'].map(role => {
                     const roleSigs = fn.signals.map((s, i) => ({ ...s, _idx: i })).filter(s => s.role === role)
                     if (!roleSigs.length) return null
                     return (
@@ -672,12 +672,14 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
 function TeamSignalRow({ sig, fi, si, updateDraft }) {
   const score = sig.score
   const inactive = sig.active === false
+  const isApi = sig.source === 'api'
   const tc = inactive ? 'rgba(255,255,255,0.1)' : tierColor(score)
   return (
     <div style={{ marginBottom: 12, opacity: inactive ? 0.3 : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <span style={{ fontSize: 10, color: inactive ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.06em', textDecoration: inactive ? 'line-through' : 'none' }}>
           {sig.label}{inactive ? ' (inactive)' : ''}
+          {isApi && !inactive && <span title="Calculated from Micro" style={{ marginLeft: 5, fontSize: 9, opacity: 0.5 }}>&#402;</span>}
         </span>
         <span style={{ fontSize: 13, fontWeight: 'bold', color: tc, fontFamily: 'monospace' }}>{inactive ? '—' : score}</span>
       </div>
@@ -686,9 +688,9 @@ function TeamSignalRow({ sig, fi, si, updateDraft }) {
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'rgba(255,255,255,0.07)', borderRadius: 2 }}>
             <div style={{ height: '100%', width: `${score}%`, background: tc, borderRadius: 2, boxShadow: `0 0 6px ${tc}77`, transition: 'width 0.15s' }} />
           </div>
-          <input type="range" min={0} max={100} value={score}
+          {!isApi && <input type="range" min={0} max={100} value={score}
             onChange={e => updateDraft(['functions', fi, 'signals', si, 'score'], Number(e.target.value))}
-            style={{ position: 'absolute', top: -10, left: 0, width: '100%', opacity: 0, cursor: 'pointer', height: 24, margin: 0 }} />
+            style={{ position: 'absolute', top: -10, left: 0, width: '100%', opacity: 0, cursor: 'pointer', height: 24, margin: 0 }} />}
         </div>
       )}
     </div>
