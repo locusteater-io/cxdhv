@@ -564,7 +564,7 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
                 <option value="FDE">FDE</option>
                 <option value="CS">CS</option>
               </select>
-              {!isApi && <button onClick={() => removeTeamMember(mi)}
+              {!isApi && <button onClick={() => { if(window.confirm(`Remove "${m.label}"? You can undo by canceling the edit.`)) removeTeamMember(mi) }}
                 style={S.removeBtn} title="Remove member">×</button>}
               {isApi && <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.1em' }}>MICRO</span>}
             </div>
@@ -603,11 +603,11 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
                     onChange={e => updateDraft(['functions', fi, 'weight'], Math.max(0, Math.min(1, Number(e.target.value))))}
                     style={{ ...S.input, width: 50, fontSize: 11, textAlign: 'center' }} />
                 </div>
-                {draft.functions.length > 3 && (
-                  <button onClick={e => { e.stopPropagation(); onRemoveFn(fn.id) }}
-                    style={S.removeBtn} title="Remove function">×</button>
-                )}
                 <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)' }}>{isExpanded ? '▲' : '▼'}</span>
+                {draft.functions.length > 3 && (
+                  <button onClick={e => { e.stopPropagation(); if(window.confirm(`Remove "${fn.label}"? You can undo by canceling the edit.`)) onRemoveFn(fn.id) }}
+                    style={{ ...S.removeBtn, marginLeft: 8 }} title="Remove function">×</button>
+                )}
               </div>
             </div>
 
