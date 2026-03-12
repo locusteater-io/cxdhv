@@ -7,6 +7,8 @@ const corsHeaders = {
 
 const LOOKBACK_DAYS = 90;
 const FUNCTION_ID = "travel_load";
+// Other team domain functions whose roster should mirror Micro profiles
+const ROSTER_SYNC_FN_IDS = ["team_sat", "company_sat"];
 
 function diffDays(start: string, end: string): number {
   const s = new Date(start + "T00:00:00Z");
@@ -161,7 +163,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Deactivate orphaned signals
+    // Deactivate orphaned travel_load signals
     if (activeSignalIds.length > 0) {
       await supabase
         .from("signals")
@@ -170,8 +172,68 @@ Deno.serve(async (req) => {
         .not("id", "in", `(${activeSignalIds.join(",")})`);
     }
 
+    // ── Sync roster to other team functions (team_sat, company_sat) ──
+    // Updates names, roles, adds missing members, removes stale ones.
+    // Preserves existing scores and active state.
+    let rosterSynced = 0;
+    for (const fnId of ROSTER_SYNC_FN_IDS) {
+      const { data: existingSigs } = await supabase
+        .from("signals")
+        .select("id, label, role, score, active, source_ref")
+        .eq("function_id", fnId);
+
+      const existingByRef = new Map(
+        (existingSigs || [])
+          .filter(s => s.source_ref)
+          .map(s => [s.source_ref, s])
+      );
+      const existingById = new Map(
+        (existingSigs || []).map(s => [s.id, s])
+      );
+
+      const validSignalIds: string[] = [];
+
+      for (const profile of profiles || []) {
+        const ref = `micro_profile:${profile.id}`;
+        const sigId = `${fnId}_${profile.id}`;
+        const role = roleLabel(roleMap.get(profile.id) || null);
+        const name = profile.full_name || "Unknown";
+        validSignalIds.push(sigId);
+
+        // Check if this profile already has a signal (by source_ref or new id)
+        const existingByRefSig = existingByRef.get(ref);
+        const existingByIdSig = existingById.get(sigId);
+        const existing = existingByRefSig || existingByIdSig;
+
+        await supabase
+          .from("signals")
+          .upsert({
+            id: existing ? existing.id : sigId,
+            function_id: fnId,
+            label: name,
+            role: role,
+            score: existing ? existing.score : 50,
+            weight: weight,
+            source: "manual",
+            source_ref: ref,
+            active: existing ? existing.active : true,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "id" });
+
+        if (existing) validSignalIds.push(existing.id);
+        rosterSynced++;
+      }
+
+      // Remove signals for profiles no longer in Micro
+      for (const sig of existingSigs || []) {
+        if (!validSignalIds.includes(sig.id)) {
+          await supabase.from("signals").delete().eq("id", sig.id);
+        }
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, synced: results.length, scores: results }),
+      JSON.stringify({ success: true, synced: results.length, roster_synced: rosterSynced, scores: results }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
