@@ -517,15 +517,30 @@ function SignalBar({ sig, onUpdate }) {
 // ── TEAM HEALTH PANEL ─────────────────────────────────────────────────────────
 function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
   const [expandedFn,setExpandedFn]=useState(null);
-  const [syncing,setSyncing]=useState(null);
-  const handleSync=async(e,fnId)=>{
+  const [syncing,setSyncing]=useState(false);
+  const [syncError,setSyncError]=useState(null);
+  const handleSync=async(e)=>{
     e.stopPropagation();
-    setSyncing(fnId);
-    try{ await onSyncFn(fnId); }catch(err){ console.error("Sync failed:",err); }
-    finally{ setSyncing(null); }
+    setSyncing(true);
+    setSyncError(null);
+    try{ await onSyncFn(); }
+    catch(err){ setSyncError("Sync failed — try again"); console.error("Sync failed:",err); }
+    finally{ setSyncing(false); }
   };
   return (
     <div style={{padding:"0 20px 16px"}}>
+      {selected&&domain.functions.some(fn=>fn.signals.some(s=>s.source==="api"))&&(
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <span onClick={e=>handleSync(e)} title="Sync with Micro tool"
+            style={{fontFamily:"monospace",fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(255,255,255,0.3)",
+              cursor:"pointer",padding:"4px 10px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:3,
+              opacity:syncing?0.4:1,display:"flex",alignItems:"center",gap:5}}>
+            <span style={{fontSize:13,display:"inline-block",animation:syncing?"spin 1s linear infinite":"none"}}>&#x21bb;</span>
+            Sync Micro
+          </span>
+          {syncError&&<span style={{fontFamily:"monospace",fontSize:9,color:"#f87171",letterSpacing:"0.05em"}}>{syncError}</span>}
+        </div>
+      )}
       {domain.functions.map(fn=>{
         const fs=fnScore(fn), fc=tierColor(fs), isSel=expandedFn===fn.id&&selected;
         const hasApiSignals=fn.signals.some(s=>s.source==="api");
@@ -539,12 +554,6 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
                 <span style={{fontFamily:"monospace",fontSize:11,letterSpacing:"0.08em",color:isSel?"rgba(255,255,255,0.9)":"rgba(255,255,255,0.45)",textTransform:"uppercase"}}>{fn.label}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                {selected&&hasApiSignals&&(
-                  <span onClick={e=>handleSync(e,fn.id)} title="Sync with Micro tool"
-                    style={{fontSize:13,cursor:"pointer",opacity:syncing===fn.id?0.4:0.5,transition:"opacity 0.15s",animation:syncing===fn.id?"spin 1s linear infinite":"none"}}>
-                    &#x21bb;
-                  </span>
-                )}
                 <span style={{fontFamily:"monospace",fontSize:14,fontWeight:"bold",color:fc}}>{Math.round(fs)}</span>
                 {selected&&<span style={{fontSize:10,color:"rgba(255,255,255,0.18)"}}>{isSel?"▲":"▼"}</span>}
               </div>
@@ -595,6 +604,11 @@ function TeamHealthPanel({ domain, selected, onUpdateMember, onSyncFn }) {
 function FnPopup({ fn, domainColor, onClose }) {
   const fs=fnScore(fn), fc=tierColor(fs), tl=tierLabel(fs);
   const [r,g,b]=hexToRgb(domainColor);
+  useEffect(()=>{
+    const h=e=>{if(e.key==="Escape")onClose();};
+    document.addEventListener("keydown",h);
+    return ()=>document.removeEventListener("keydown",h);
+  },[onClose]);
   return (
     <div onClick={e=>{e.stopPropagation();onClose();}} style={{
       position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",

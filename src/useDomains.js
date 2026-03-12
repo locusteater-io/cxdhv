@@ -1,14 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
-
-// Canonical signal order for standard (non-team) domains
-const SIGNAL_ORDER = [
-  'Overall Effectiveness',
-  'Process Clarity',
-  'Process Accuracy',
-  'System Functionality',
-  'Accountability & Visibility',
-];
+import { SIGNAL_ORDER } from './constants'
 
 // Transform flat DB rows into the nested structure App.jsx expects
 function buildDomains(dbDomains, dbFunctions, dbSignals) {
@@ -113,7 +105,10 @@ export function useDomains() {
         },
       }
     )
-    if (!res.ok) throw new Error(`Sync failed: ${res.status}`)
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || `Sync failed: ${res.status}`)
+    }
     await load()
   }, [load])
 

@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from './supabase'
-
-const SIGNAL_ORDER = [
-  'Overall Effectiveness',
-  'Process Clarity',
-  'Process Accuracy',
-  'System Functionality',
-  'Accountability & Visibility',
-]
+import { SIGNAL_ORDER } from './constants'
 
 function tierColor(s) { return s >= 75 ? '#4ade80' : s >= 55 ? '#facc15' : '#f87171' }
 function hexToRgb(hex) { return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)] }
@@ -36,16 +29,24 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false)
 
   const reload = useCallback(async () => {
-    const [{ data: d }, { data: f }, { data: s }] = await Promise.all([
-      supabase.from('domains').select('*').order('sort_order'),
-      supabase.from('functions').select('*').order('sort_order'),
-      supabase.from('signals').select('*'),
-    ])
-    setDomains(d)
-    setFunctions(f)
-    setSignals(s)
-    setLoading(false)
-    return { d, f, s }
+    try {
+      const [{ data: d, error: e1 }, { data: f, error: e2 }, { data: s, error: e3 }] = await Promise.all([
+        supabase.from('domains').select('*').order('sort_order'),
+        supabase.from('functions').select('*').order('sort_order'),
+        supabase.from('signals').select('*'),
+      ])
+      if (e1 || e2 || e3) throw e1 || e2 || e3
+      setDomains(d)
+      setFunctions(f)
+      setSignals(s)
+      return { d, f, s }
+    } catch (err) {
+      console.error('Failed to load data:', err)
+      setSaveError(`Failed to load: ${err.message}`)
+      return { d: domains, f: functions, s: signals }
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -126,7 +127,9 @@ export default function AdminPage() {
   const toggleTeamMemberActive = (memberIndex) => {
     setDraft(prev => {
       const next = JSON.parse(JSON.stringify(prev))
-      const newActive = !next.functions[0].signals[memberIndex].active
+      const firstSig = next.functions[0]?.signals?.[memberIndex]
+      if (!firstSig) return prev
+      const newActive = !firstSig.active
       next.functions.forEach(fn => {
         if (fn.signals[memberIndex]) fn.signals[memberIndex].active = newActive
       })

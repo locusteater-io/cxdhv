@@ -1,9 +1,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = [
+  "https://cxdhv.locusteater.io",
+  "https://cxdhv.netlify.app",
+  "https://locusteater-io.github.io",
+  "http://localhost:5173",
+  "http://localhost:5174",
+];
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get("Origin") || "";
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": allowed,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+}
 
 const LOOKBACK_DAYS = 90;
 const FUNCTION_ID = "travel_load";
@@ -32,11 +44,31 @@ function roleLabel(appRole: string | null): string {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Validate authorization — require a Bearer token
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate origin for browser requests
+    const origin = req.headers.get("Origin");
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden origin" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -75,11 +107,12 @@ Deno.serve(async (req) => {
       .in("trip_id", tripIds.length > 0 ? tripIds : ["__none__"]);
     if (assignErr) throw assignErr;
 
-    // Build per-user trip lists
+    // Build per-user trip lists (O(1) lookup via Map)
+    const tripMap = new Map((trips || []).map(t => [t.id, t]));
     const userTrips: Record<string, typeof trips> = {};
     for (const a of assignments || []) {
       if (!userTrips[a.user_id]) userTrips[a.user_id] = [];
-      const trip = (trips || []).find(t => t.id === a.trip_id);
+      const trip = tripMap.get(a.trip_id);
       if (trip) userTrips[a.user_id].push(trip);
     }
 
@@ -95,6 +128,7 @@ Deno.serve(async (req) => {
     const existingActiveMap = new Map((existingSignals || []).map(s => [s.id, s.active]));
 
     const activeSignalIds: string[] = [];
+    const travelSignalBatch: Record<string, unknown>[] = [];
     const results: { name: string; signal_id: string; road_days: number; pto_days: number; trip_count: number; micro_score: number; cxdhv_score: number }[] = [];
 
     for (const profile of profiles || []) {
@@ -102,8 +136,6 @@ Deno.serve(async (req) => {
       const signalId = `travel_${profile.id}`;
       activeSignalIds.push(signalId);
 
-      // Road days = event_start to event_end for in_person + travel_day types
-      // (matches Micro: does NOT include travel_day_start/travel_day_end fields)
       let roadDays = 0;
       let ptoDays = 0;
       let tripCount = 0;
@@ -129,28 +161,23 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Micro formula: clamp(0, 100, round((road_days * 2 + trip_count) / (pto_days + 5) * 10))
       const rawScore = (roadDays * 2 + tripCount) / (ptoDays + 5) * 10;
       const microScore = Math.min(100, Math.max(0, Math.round(rawScore)));
-      // Invert for CXDHV (higher = healthier)
       const cxdhvScore = 100 - microScore;
-
       const role = roleLabel(roleMap.get(profile.id) || null);
 
-      await supabase
-        .from("signals")
-        .upsert({
-          id: signalId,
-          function_id: FUNCTION_ID,
-          label: profile.full_name || "Unknown",
-          score: cxdhvScore,
-          source: "api",
-          source_ref: `micro_profile:${profile.id}`,
-          role: role,
-          weight: weight,
-          active: existingActiveMap.has(signalId) ? existingActiveMap.get(signalId) : true,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "id" });
+      travelSignalBatch.push({
+        id: signalId,
+        function_id: FUNCTION_ID,
+        label: profile.full_name || "Unknown",
+        score: cxdhvScore,
+        source: "api",
+        source_ref: `micro_profile:${profile.id}`,
+        role: role,
+        weight: weight,
+        active: existingActiveMap.has(signalId) ? existingActiveMap.get(signalId) : true,
+        updated_at: now.toISOString(),
+      });
 
       results.push({
         name: profile.full_name || "Unknown",
@@ -163,7 +190,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Deactivate orphaned travel_load signals
+    // Batch upsert travel_load signals
+    if (travelSignalBatch.length > 0) {
+      const { error: batchErr } = await supabase
+        .from("signals")
+        .upsert(travelSignalBatch, { onConflict: "id" });
+      if (batchErr) throw batchErr;
+    }
+
+    // Soft-deactivate orphaned travel_load signals
     if (activeSignalIds.length > 0) {
       await supabase
         .from("signals")
@@ -173,7 +208,7 @@ Deno.serve(async (req) => {
     }
 
     // ── Sync roster to other team functions (team_sat, company_sat) ──
-    // Updates names, roles, adds missing members, removes stale ones.
+    // Updates names, roles, adds missing members, soft-deactivates stale ones.
     // Preserves existing scores and active state.
     let rosterSynced = 0;
     for (const fnId of ROSTER_SYNC_FN_IDS) {
@@ -191,43 +226,52 @@ Deno.serve(async (req) => {
         (existingSigs || []).map(s => [s.id, s])
       );
 
-      const validSignalIds: string[] = [];
+      const rosterBatch: Record<string, unknown>[] = [];
+      const validSignalIds = new Set<string>();
 
       for (const profile of profiles || []) {
         const ref = `micro_profile:${profile.id}`;
         const sigId = `${fnId}_${profile.id}`;
         const role = roleLabel(roleMap.get(profile.id) || null);
         const name = profile.full_name || "Unknown";
-        validSignalIds.push(sigId);
 
-        // Check if this profile already has a signal (by source_ref or new id)
         const existingByRefSig = existingByRef.get(ref);
         const existingByIdSig = existingById.get(sigId);
         const existing = existingByRefSig || existingByIdSig;
+        const upsertId = existing ? existing.id : sigId;
+        validSignalIds.add(upsertId);
 
-        await supabase
-          .from("signals")
-          .upsert({
-            id: existing ? existing.id : sigId,
-            function_id: fnId,
-            label: name,
-            role: role,
-            score: existing ? existing.score : 50,
-            weight: weight,
-            source: "manual",
-            source_ref: ref,
-            active: existing ? existing.active : true,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "id" });
+        rosterBatch.push({
+          id: upsertId,
+          function_id: fnId,
+          label: name,
+          role: role,
+          score: existing ? existing.score : 50,
+          weight: weight,
+          source: "manual",
+          source_ref: ref,
+          active: existing ? existing.active : true,
+          updated_at: now.toISOString(),
+        });
 
-        if (existing) validSignalIds.push(existing.id);
         rosterSynced++;
       }
 
-      // Remove signals for profiles no longer in Micro
+      // Batch upsert roster signals
+      if (rosterBatch.length > 0) {
+        const { error: rosterErr } = await supabase
+          .from("signals")
+          .upsert(rosterBatch, { onConflict: "id" });
+        if (rosterErr) throw rosterErr;
+      }
+
+      // Soft-deactivate signals for profiles no longer in Micro
       for (const sig of existingSigs || []) {
-        if (!validSignalIds.includes(sig.id)) {
-          await supabase.from("signals").delete().eq("id", sig.id);
+        if (!validSignalIds.has(sig.id)) {
+          await supabase
+            .from("signals")
+            .update({ active: false })
+            .eq("id", sig.id);
         }
       }
     }
