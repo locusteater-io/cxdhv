@@ -525,27 +525,32 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
           <div style={{ fontSize: 9, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase', marginBottom: 10 }}>
             Team Roster — edits apply to all functions
           </div>
-          {members.map((m, mi) => (
+          {members.map((m, mi) => {
+            const isApi = m.source === 'api';
+            return (
             <div key={mi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, opacity: m.active ? 1 : 0.35 }}>
-              <button onClick={() => toggleTeamMemberActive(mi)}
-                style={{ ...S.toggleBtn, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)' }}>
+              <button onClick={() => !isApi && toggleTeamMemberActive(mi)}
+                style={{ ...S.toggleBtn, background: m.active ? '#4ade80' : 'rgba(255,255,255,0.1)', color: m.active ? '#020408' : 'rgba(255,255,255,0.3)', cursor: isApi ? 'default' : 'pointer' }}>
                 {m.active ? '●' : '○'}
               </button>
-              <input value={m.label}
-                onChange={e => updateTeamMemberName(mi, e.target.value)}
-                style={{ ...S.input, flex: 1, fontSize: 11, textDecoration: m.active ? 'none' : 'line-through' }}
+              <input value={m.label} readOnly={isApi}
+                onChange={e => !isApi && updateTeamMemberName(mi, e.target.value)}
+                style={{ ...S.input, flex: 1, fontSize: 11, textDecoration: m.active ? 'none' : 'line-through', cursor: isApi ? 'default' : undefined }}
                 placeholder="Member name" />
-              <select value={m.role || 'FDE'}
-                onChange={e => updateTeamMemberRole(mi, e.target.value)}
-                style={{ ...S.input, width: 90, fontSize: 10, padding: '4px 6px' }}>
+              <select value={m.role || 'FDE'} disabled={isApi}
+                onChange={e => !isApi && updateTeamMemberRole(mi, e.target.value)}
+                style={{ ...S.input, width: 90, fontSize: 10, padding: '4px 6px', opacity: isApi ? 0.5 : 1 }}>
+                <option value="Director">Director</option>
                 <option value="Manager">Manager</option>
                 <option value="FDE">FDE</option>
                 <option value="CS">CS</option>
               </select>
-              <button onClick={() => removeTeamMember(mi)}
-                style={S.removeBtn} title="Remove member">×</button>
+              {!isApi && <button onClick={() => removeTeamMember(mi)}
+                style={S.removeBtn} title="Remove member">×</button>}
+              {isApi && <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.1em' }}>MICRO</span>}
             </div>
-          ))}
+            );
+          })}
           <div onClick={addTeamMember} style={{ ...S.addFnBtn, borderTop: 'none', padding: '6px 0', textAlign: 'left', fontSize: 9 }}>
             + Add Team Member
           </div>

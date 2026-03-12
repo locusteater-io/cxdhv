@@ -122,16 +122,16 @@ function hexToRgb(hex)  { return [parseInt(hex.slice(1,3),16),parseInt(hex.slice
 function IsoView({ domains, onClick }) {
   const canvasRef = useRef(null);
   const animRef   = useRef(null);
-  const hoverRef  = useRef(false);
   const progRef   = useRef(0);
+  const [hoveredDomain, setHoveredDomain] = useState(null);
+  const planeHitsRef = useRef([]); // hit regions per domain for mouse detection
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
 
-    // Isometric projection helpers
-    const ISO_ANGLE = Math.PI / 6; // 30 degrees
+    const ISO_ANGLE = Math.PI / 6;
     const toIso = (x, y, z) => ({
       sx: (x - y) * Math.cos(ISO_ANGLE),
       sy: (x + y) * Math.sin(ISO_ANGLE) - z,
@@ -139,17 +139,12 @@ function IsoView({ domains, onClick }) {
 
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2 + 40;
-
-    // Radar geometry — 3 axes (one per function) on the XY plane
     const RADAR_SCALE = 110;
-    const N = 3; // functions per domain
 
-    const radarPt = (fnIdx, score, z) => {
-      const a = (fnIdx / N) * Math.PI * 2 - Math.PI / 2;
+    const radarPt = (fnIdx, nFns, score, z) => {
+      const a = (fnIdx / nFns) * Math.PI * 2 - Math.PI / 2;
       const r = (score / 100) * RADAR_SCALE;
-      const rx = Math.cos(a) * r;
-      const ry = Math.sin(a) * r;
-      const iso = toIso(rx, ry, z);
+      const iso = toIso(Math.cos(a) * r, Math.sin(a) * r, z);
       return { x: cx + iso.sx, y: cy + iso.sy };
     };
 
@@ -158,46 +153,43 @@ function IsoView({ domains, onClick }) {
       return { x: cx + iso.sx, y: cy + iso.sy };
     };
 
-    const LAYER_Z = 54; // Z spacing between domain planes
+    const LAYER_Z = 54;
     const NUM_DOMAINS = domains.length;
+    const MAX_FNS = Math.max(...domains.map(d => d.functions.length));
 
     let startTime = null;
     const ANIM_DURATION = 1800;
+    const hov = hoveredDomain;
 
     const draw = (ts) => {
       if (!startTime) startTime = ts;
       const elapsed = ts - startTime;
       progRef.current = Math.min(1, elapsed / ANIM_DURATION);
       const p = progRef.current;
-
-      // Easing
       const ease = t => t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
       const ep = ease(p);
 
       ctx.clearRect(0, 0, W, H);
 
-      // ── ISOMETRIC GRID (XY base plane) ────────────────────────
-      const GRID_SIZE = 160;
-      const GRID_LINES = 6;
+      // ── ISOMETRIC GRID ────────────────────────────────────────
+      const GRID_SIZE = 160, GRID_LINES = 6;
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.lineWidth = 0.5;
       for (let i = -GRID_LINES; i <= GRID_LINES; i++) {
         const step = GRID_SIZE / GRID_LINES;
-        // X-parallel lines
         const a = gridPt(-GRID_SIZE, i * step, 0);
         const b = gridPt( GRID_SIZE, i * step, 0);
         ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
-        // Y-parallel lines
         const c = gridPt(i * step, -GRID_SIZE, 0);
         const d = gridPt(i * step,  GRID_SIZE, 0);
         ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.stroke();
       }
       ctx.restore();
 
-      // ── Z AXIS PILLARS (at radar vertices) ────────────────────
-      for (let fnIdx = 0; fnIdx < N; fnIdx++) {
-        const a_base = (fnIdx / N) * Math.PI * 2 - Math.PI / 2;
+      // ── Z AXIS PILLARS ────────────────────────────────────────
+      for (let fi = 0; fi < MAX_FNS; fi++) {
+        const a_base = (fi / MAX_FNS) * Math.PI * 2 - Math.PI / 2;
         const rx = Math.cos(a_base) * RADAR_SCALE;
         const ry = Math.sin(a_base) * RADAR_SCALE;
         const topZ = (NUM_DOMAINS - 1) * LAYER_Z + 20;
@@ -212,46 +204,49 @@ function IsoView({ domains, onClick }) {
         ctx.restore();
       }
 
-      // ── DOMAIN PLANES — bottom to top ─────────────────────────
+      // ── DOMAIN PLANES ─────────────────────────────────────────
+      const hits = [];
       domains.forEach((domain, di) => {
         const z = di * LAYER_Z * ep;
-        const [r,g,b] = hexToRgb(domain.color);
         const ds = domainScore(domain);
         const tc = tierColor(ds);
         const fns = domain.functions;
+        const nFns = fns.length;
+        const isHov = hov === di;
+        const isDimmed = hov !== null && !isHov;
+        const dimAlpha = isDimmed ? 0.25 : 1;
 
-        // Plane ghost (flat polygon at this Z)
+        // Collect outer ring points for hit testing
+        const outerPts = [];
+        for (let i = 0; i < nFns; i++) outerPts.push(radarPt(i, 100, z));
+        hits.push(outerPts);
+
+        // Plane ghost
         ctx.save();
-        ctx.globalAlpha = 0.04;
+        ctx.globalAlpha = (isHov ? 0.09 : 0.04) * dimAlpha;
         ctx.fillStyle = domain.color;
         ctx.beginPath();
-        for (let i = 0; i < N; i++) {
-          const pt = radarPt(i, 100, z);
-          i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y);
-        }
+        outerPts.forEach((pt,i) => i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y));
         ctx.closePath(); ctx.fill();
         ctx.restore();
 
-        // Plane border (outer ring)
+        // Plane border
         ctx.save();
-        ctx.globalAlpha = 0.08;
+        ctx.globalAlpha = (isHov ? 0.25 : 0.08) * dimAlpha;
         ctx.strokeStyle = domain.color;
-        ctx.lineWidth = 0.8;
+        ctx.lineWidth = isHov ? 1.4 : 0.8;
         ctx.beginPath();
-        for (let i = 0; i < N; i++) {
-          const pt = radarPt(i, 100, z);
-          i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y);
-        }
+        outerPts.forEach((pt,i) => i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y));
         ctx.closePath(); ctx.stroke();
         ctx.restore();
 
         // Data polygon fill
         ctx.save();
-        ctx.globalAlpha = 0.18;
+        ctx.globalAlpha = (isHov ? 0.30 : 0.18) * dimAlpha;
         ctx.fillStyle = tc;
         ctx.beginPath();
         fns.forEach((fn,i) => {
-          const pt = radarPt(i, fnScore(fn), z);
+          const pt = radarPt(i, nFns, fnScore(fn), z);
           i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y);
         });
         ctx.closePath(); ctx.fill();
@@ -259,78 +254,77 @@ function IsoView({ domains, onClick }) {
 
         // Data polygon stroke
         ctx.save();
-        ctx.globalAlpha = 0.9;
+        ctx.globalAlpha = (isHov ? 1 : 0.9) * dimAlpha;
         ctx.strokeStyle = tc;
-        ctx.lineWidth = tier(ds)==="critical" ? 2.0 : 1.6;
+        ctx.lineWidth = isHov ? 2.5 : (tier(ds)==="critical" ? 2.0 : 1.6);
         ctx.lineJoin = "round";
         ctx.shadowColor = tc;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = isHov ? 18 : 10;
         ctx.beginPath();
         fns.forEach((fn,i) => {
-          const pt = radarPt(i, fnScore(fn), z);
+          const pt = radarPt(i, nFns, fnScore(fn), z);
           i===0 ? ctx.moveTo(pt.x,pt.y) : ctx.lineTo(pt.x,pt.y);
         });
         ctx.closePath(); ctx.stroke();
         ctx.restore();
 
-        // Vertex dots
+        // Vertex dots — sized by function weight
         fns.forEach((fn,i) => {
           const fs = fnScore(fn);
           const vc = tierColor(fs);
-          const pt = radarPt(i, fs, z);
+          const pt = radarPt(i, nFns, fs, z);
+          const wr = 2 + fn.weight * 8; // weight 0.2→3.6, 0.4→5.2
           ctx.save();
-          ctx.fillStyle = vc; ctx.shadowColor = vc; ctx.shadowBlur = 8;
-          ctx.beginPath(); ctx.arc(pt.x,pt.y,3,0,Math.PI*2); ctx.fill();
+          ctx.globalAlpha = dimAlpha;
+          ctx.fillStyle = vc; ctx.shadowColor = vc; ctx.shadowBlur = isHov ? 14 : 8;
+          ctx.beginPath(); ctx.arc(pt.x,pt.y, isHov ? wr+1.5 : wr, 0,Math.PI*2); ctx.fill();
           ctx.restore();
         });
 
-        // Domain label at top of each plane
+        // Domain label — positioned to the left of each plane
         if (ep > 0.3) {
-          const labelAlpha = Math.max(0, (ep - 0.3) / 0.7);
-          const labelPt = radarPt(1, 115, z);
+          const labelAlpha = Math.max(0, (ep - 0.3) / 0.7) * dimAlpha;
+          const labelPt = radarPt(0, nFns, 120, z);
           ctx.save();
-          ctx.globalAlpha = labelAlpha * 0.9;
+          ctx.globalAlpha = labelAlpha * (isHov ? 1 : 0.8);
+          ctx.textAlign = "right";
+          // Abbr
           ctx.fillStyle = domain.color;
-          ctx.font = `bold 11px 'SF Mono','Fira Code',monospace`;
-          ctx.textAlign = "center";
+          ctx.font = `bold ${isHov ? 13 : 11}px 'SF Mono','Fira Code',monospace`;
           ctx.shadowColor = domain.color;
-          ctx.shadowBlur = 6;
-          ctx.fillText(domain.abbr, labelPt.x, labelPt.y);
+          ctx.shadowBlur = isHov ? 12 : 6;
+          ctx.fillText(domain.abbr, labelPt.x - 8, labelPt.y);
           // Score
-          ctx.fillStyle = tierColor(ds);
-          ctx.font = `bold 13px 'SF Mono','Fira Code',monospace`;
-          ctx.fillText(Math.round(ds), labelPt.x, labelPt.y + 15);
+          ctx.fillStyle = tc;
+          ctx.font = `bold ${isHov ? 16 : 13}px 'SF Mono','Fira Code',monospace`;
+          ctx.shadowColor = tc;
+          ctx.fillText(Math.round(ds), labelPt.x - 8, labelPt.y + (isHov ? 18 : 15));
           ctx.restore();
+
+          // Show full name + tier on hover
+          if (isHov && ep === 1) {
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.font = `600 9px 'SF Mono','Fira Code',monospace`;
+            ctx.textAlign = "right";
+            ctx.fillText(domain.label.toUpperCase(), labelPt.x - 8, labelPt.y - 14);
+            ctx.fillStyle = tc;
+            ctx.fillText(tierLabel(ds), labelPt.x - 8, labelPt.y + (isHov ? 33 : 28));
+            ctx.restore();
+          }
         }
       });
-
-      // ── AXIS LABELS at base ────────────────────────────────────
-      if (ep > 0.5) {
-        const la = Math.max(0, (ep-0.5)/0.5);
-        // Use first domain's function labels
-        domains[0].functions.forEach((fn, i) => {
-          const a  = (i / N) * Math.PI * 2 - Math.PI / 2;
-          const lx = cx + toIso(Math.cos(a)*(RADAR_SCALE+28), Math.sin(a)*(RADAR_SCALE+28), 0).sx;
-          const ly = cy + toIso(Math.cos(a)*(RADAR_SCALE+28), Math.sin(a)*(RADAR_SCALE+28), 0).sy;
-          ctx.save();
-          ctx.globalAlpha = la * 0.5;
-          ctx.fillStyle = "rgba(255,255,255,0.7)";
-          ctx.font = `700 9px 'SF Mono','Fira Code',monospace`;
-          ctx.textAlign = Math.cos(a) > 0.2 ? "left" : Math.cos(a) < -0.2 ? "right" : "center";
-          ctx.fillText(fn.label.toUpperCase(), lx, ly);
-          ctx.restore();
-        });
-      }
+      planeHitsRef.current = hits;
 
       // ── CLICK HINT ────────────────────────────────────────────
-      if (ep === 1) {
+      if (ep === 1 && hov === null) {
         const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 600);
         ctx.save();
         ctx.globalAlpha = 0.3 + 0.3 * pulse;
         ctx.fillStyle = "white";
         ctx.font = `700 10px 'SF Mono','Fira Code',monospace`;
         ctx.textAlign = "center";
-        ctx.letterSpacing = "0.18em";
         ctx.fillText("CLICK TO EXPAND", cx, cy + 130);
         ctx.restore();
       }
@@ -340,11 +334,41 @@ function IsoView({ domains, onClick }) {
 
     animRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(animRef.current);
-  }, [domains]);
+  }, [domains, hoveredDomain]);
+
+  // Point-in-polygon test for hover detection
+  const pointInPoly = useCallback((px, py, pts) => {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+      if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi))
+        inside = !inside;
+    }
+    return inside;
+  }, []);
+
+  const handleMouseMove = useCallback((e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * sx, my = (e.clientY - rect.top) * sy;
+    const hits = planeHitsRef.current;
+    // Check from top layer down (last = topmost)
+    let found = null;
+    for (let i = hits.length - 1; i >= 0; i--) {
+      if (hits[i].length && pointInPoly(mx, my, hits[i])) { found = i; break; }
+    }
+    setHoveredDomain(found);
+  }, [pointInPoly]);
+
+  const handleMouseLeave = useCallback(() => setHoveredDomain(null), []);
 
   return (
     <canvas ref={canvasRef} width={700} height={520}
       onClick={onClick}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       style={{ display:"block", cursor:"pointer", margin:"0 auto" }} />
   );
 }
@@ -413,8 +437,9 @@ function RadarChart({ domain, size, doAnim, hoveredIdx, onHoverIdx }) {
         const fs=fnScore(fn), vc=tierColor(fs);
         const [x,y]=pt(i,maxR*(fs/100)*p);
         const isHov=hoveredIdx===i;
+        const wr=2+fn.weight*8; // weight 0.2→3.6, 0.4→5.2
         ctx.save(); ctx.fillStyle=vc; ctx.shadowColor=vc; ctx.shadowBlur=isHov?18:10;
-        ctx.beginPath(); ctx.arc(x,y,isHov?5.5:3.5,0,Math.PI*2); ctx.fill(); ctx.restore();
+        ctx.beginPath(); ctx.arc(x,y,isHov?wr+2:wr,0,Math.PI*2); ctx.fill(); ctx.restore();
         dots.push({x,y});
       });
       dotPosRef.current=dots;
@@ -512,7 +537,7 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
             </div>
             {isSel&&(
               <div style={{marginTop:12,paddingLeft:15,animation:"fadeIn 0.15s ease"}}>
-                {["Manager","FDE","CS"].map(role=>{
+                {["Director","Manager","FDE","CS"].map(role=>{
                   const members=fn.signals.filter(s=>s.role===role);
                   if(!members.length)return null;
                   return (
@@ -529,10 +554,10 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
                             </div>
                             {!inactive&&<div style={{position:"relative",height:3,background:"rgba(255,255,255,0.06)",borderRadius:2}}>
                               <div style={{height:"100%",width:`${sig.score}%`,background:sc,borderRadius:2,boxShadow:`0 0 5px ${sc}66`,transition:"width 0.2s"}} />
-                              <input type="range" min={0} max={100} value={sig.score}
+                              {sig.source!=="api"&&<input type="range" min={0} max={100} value={sig.score}
                                 onChange={e=>onUpdateMember(domain.id,fn.id,sig.id,Number(e.target.value))}
                                 onClick={e=>e.stopPropagation()}
-                                style={{position:"absolute",top:-10,left:0,width:"100%",opacity:0,cursor:"pointer",height:22,margin:0}} />
+                                style={{position:"absolute",top:-10,left:0,width:"100%",opacity:0,cursor:"pointer",height:22,margin:0}} />}
                             </div>}
                           </div>
                         );
