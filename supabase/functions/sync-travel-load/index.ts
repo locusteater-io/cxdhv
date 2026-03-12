@@ -18,10 +18,11 @@ function countDaysInRange(start: string, end: string): number {
 function roleLabel(appRole: string | null): string {
   switch (appRole) {
     case "cx_vp":
+      return "CX VP";
     case "cx_director":
-      return "Director";
+      return "CX Director";
     case "cx_manager":
-      return "Manager";
+      return "CX Manager";
     case "css":
       return "CS";
     default:

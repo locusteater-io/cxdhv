@@ -537,7 +537,7 @@ function TeamHealthPanel({ domain, selected, onUpdateMember }) {
             </div>
             {isSel&&(
               <div style={{marginTop:12,paddingLeft:15,animation:"fadeIn 0.15s ease"}}>
-                {["Director","Manager","FDE","CS"].map(role=>{
+                {["CX VP","CX Director","CX Manager","FDE","CS"].map(role=>{
                   const members=fn.signals.filter(s=>s.role===role);
                   if(!members.length)return null;
                   return (

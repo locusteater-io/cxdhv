@@ -540,8 +540,9 @@ function EditCard({ draft, setDraft, updateDraft, expandedFn, setExpandedFn,
               <select value={m.role || 'FDE'} disabled={isApi}
                 onChange={e => !isApi && updateTeamMemberRole(mi, e.target.value)}
                 style={{ ...S.input, width: 90, fontSize: 10, padding: '4px 6px', opacity: isApi ? 0.5 : 1 }}>
-                <option value="Director">Director</option>
-                <option value="Manager">Manager</option>
+                <option value="CX VP">CX VP</option>
+                <option value="CX Director">CX Director</option>
+                <option value="CX Manager">CX Manager</option>
                 <option value="FDE">FDE</option>
                 <option value="CS">CS</option>
               </select>
